@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: whatsapp-bot
+    runtime: node
+    plan: free
+    region: frankfurt
+    branch: main
+    rootDirectory: .
+    buildCommand: npm install
+    startCommand: npm start
+    autoDeploy: true
+    envVars:
+      - key: PORT
+        value: 4000
+      - key: NODE_ENV
+        value: production
+      # Остальные переменные добавите вручную в настройках Render
