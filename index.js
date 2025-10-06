@@ -180,19 +180,55 @@ async function getAIResponse(userMessage, phone) {
 }
 
 // ====== Webhook ======
-app.post("/webhook-whatsapp", (req, res) => {
-  const data = req.body?.data || req.body || {};
-  const from = data.from || data.sender;
-  const text = data.body || data.message;
+app.post("/webhook-whatsapp", async (req, res) => {
+  const data = req.body;
 
-  if (!from || !text) return res.sendStatus(200);
+  // Проверяем, что есть сообщение
+  if (!data || !data.message) return res.sendStatus(200);
+
+  const from = data.message.from;
+  const text = data.message.body?.trim();
+  const isFromMe = data.message.fromMe; // ⚠️ UltraMsg присылает это поле
+
+  // 🚫 Игнорируем сообщения, отправленные самим ботом
+  if (isFromMe) {
+    console.log("⏩ Игнорируем сообщение, отправленное ботом:", text);
+    return res.sendStatus(200);
+  }
+
+  console.log("📩 Получено сообщение:", from, text);
+
+  try {
+    // GPT ответ
+    const ai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const response = await ai.chat.completions.create({
+      model: "gpt-3.5-turbo",
+      messages: [
+        { role: "system", content: "Ты дружелюбный WhatsApp-ассистент." },
+        { role: "user", content: text }
+      ]
+    });
+
+    const reply = response.choices[0].message.content;
+    console.log("🤖 Ответ:", reply);
+
+    // Отправляем ответ пользователю
+    await axios.post(
+      `https://api.ultramsg.com/${process.env.ULTRAMSG_INSTANCE_ID}/messages/chat`,
+      {
+        token: process.env.ULTRAMSG_TOKEN,
+        to: from,
+        body: reply
+      }
+    );
+
+  } catch (err) {
+    console.error("Ошибка при обработке сообщения:", err);
+  }
+
   res.sendStatus(200);
-
-  (async () => {
-    const reply = await getAIResponse(text, from);
-    await sendMessage(from, reply);
-  })();
 });
+
 
 // ====== Health check ======
 app.get("/", (req, res) => {
