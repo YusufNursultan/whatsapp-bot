@@ -1,11 +1,9 @@
-// index.js — WhatsApp bot (UltraMsg) с GPT и корректным system prompt
 import express from "express";
 import bodyParser from "body-parser";
 import axios from "axios";
-import dotenv from "dotenv";
 import OpenAI from "openai";
 
-dotenv.config();
+// ⚠️ Убираем dotenv — Render сам подставляет env
 const app = express();
 app.use(bodyParser.json());
 
@@ -14,13 +12,17 @@ const PORT = process.env.PORT || 4000;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const ULTRAMSG_INSTANCE_ID = process.env.ULTRAMSG_INSTANCE_ID;
 const ULTRAMSG_TOKEN = process.env.ULTRAMSG_TOKEN;
-const OPERATOR_PHONE = process.env.OPERATOR_PHONE; 
-
+const OPERATOR_PHONE = process.env.OPERATOR_PHONE;
 
 if (!OPENAI_API_KEY || !ULTRAMSG_INSTANCE_ID || !ULTRAMSG_TOKEN) {
-  console.error("❌ Missing required env vars: OPENAI_API_KEY, ULTRAMSG_INSTANCE_ID, ULTRAMSG_TOKEN");
+  console.error("❌ Missing required env vars. Check Render environment settings.");
   process.exit(1);
 }
+
+app.listen(PORT, () => {
+  console.log(`✅ WhatsApp Bot running on port ${PORT}`);
+});
+
 
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
