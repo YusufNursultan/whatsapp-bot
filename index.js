@@ -138,17 +138,22 @@ async function getAIResponse(userMessage, phone) {
 
 // ====== Webhook ======
 app.post("/webhook-whatsapp", async (req, res) => {
+  console.log("🟢 Webhook вызван!");
+  console.log("📦 Полные данные webhook:", JSON.stringify(req.body, null, 2));
+
   const data = req.body;
 
   // Проверяем, что есть сообщение
   if (!data || !data.message) {
-    console.log("📨 Webhook ping received");
+    console.log("📨 Webhook ping received (no message)");
     return res.sendStatus(200);
   }
 
   const from = data.message.from;
   const text = data.message.body?.trim();
-  const isFromMe = data.message.fromMe; // ⚠️ UltraMsg присылает это поле
+  const isFromMe = data.message.fromMe;
+
+  console.log(`📩 Сообщение: from=${from}, text="${text}", fromMe=${isFromMe}`);
 
   // 🚫 Игнорируем сообщения, отправленные самим ботом
   if (isFromMe) {
@@ -156,14 +161,16 @@ app.post("/webhook-whatsapp", async (req, res) => {
     return res.sendStatus(200);
   }
 
-  console.log("📩 Получено сообщение от пользователя:", from, text);
+  console.log("🔍 Начинаем обработку сообщения от пользователя");
 
   try {
     // Получаем ответ от AI
+    console.log("🤖 Запрос к OpenAI...");
     const reply = await getAIResponse(text, from);
-    console.log("🤖 Ответ AI:", reply);
+    console.log("✅ Ответ AI получен:", reply.substring(0, 100) + "...");
 
     // Отправляем ответ пользователю
+    console.log("📤 Отправка сообщения через UltraMSG...");
     await sendMessage(from, reply);
     console.log("✅ Ответ отправлен пользователю");
 
