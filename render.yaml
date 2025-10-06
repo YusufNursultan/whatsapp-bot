@@ -5,7 +5,6 @@ services:
     plan: free
     region: frankfurt
     branch: main
-    rootDirectory: .
     buildCommand: npm install
     startCommand: npm start
     autoDeploy: true
@@ -14,4 +13,3 @@ services:
         value: 4000
       - key: NODE_ENV
         value: production
-      # Остальные переменные добавите вручную в настройках Render
