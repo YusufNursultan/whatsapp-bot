@@ -3,6 +3,10 @@ import bodyParser from "body-parser";
 import axios from "axios";
 import OpenAI from "openai";
 
+app.post("/webhook-whatsapp", async (req, res) => {
+  console.log("📨 Webhook data:", JSON.stringify(req.body, null, 2)); // <== добавь это
+  res.sendStatus(200);
+});
 // ⚙️ Express app
 const app = express();
 app.use(bodyParser.json());
