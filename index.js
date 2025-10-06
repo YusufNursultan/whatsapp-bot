@@ -87,17 +87,27 @@ ${cartText}
 // ====== sendMessage ======
 async function sendMessage(to, text) {
   try {
+    // 🔧 Убедимся что номер в правильном формате
+    const cleanTo = to.replace('@c.us', ''); // Убираем суффикс если есть
+    
     const payload = new URLSearchParams({
       token: ULTRAMSG_TOKEN,
-      to,
+      to: cleanTo,
       body: text,
     }).toString();
+
+    console.log(`📤 Отправка сообщения на ${cleanTo}: ${text.substring(0, 50)}...`);
 
     const resp = await axios.post(
       `https://api.ultramsg.com/${ULTRAMSG_INSTANCE_ID}/messages/chat`,
       payload,
-      { headers: { "Content-Type": "application/x-www-form-urlencoded" }, timeout: 15000 }
+      { 
+        headers: { "Content-Type": "application/x-www-form-urlencoded" }, 
+        timeout: 15000 
+      }
     );
+
+    console.log("✅ Сообщение отправлено, ответ UltraMSG:", resp.data);
 
     const sentId = resp.data?.id || resp.data?.messageId;
     if (sentId) {
@@ -108,6 +118,7 @@ async function sendMessage(to, text) {
     return resp.data;
   } catch (err) {
     console.error("❌ sendMessage error:", err?.response?.data || err.message);
+    throw err; // 🔧 Важно: пробрасываем ошибку дальше
   }
 }
 
@@ -139,25 +150,32 @@ async function getAIResponse(userMessage, phone) {
 // ====== Webhook ======
 app.post("/webhook-whatsapp", async (req, res) => {
   console.log("🟢 Webhook вызван!");
-  console.log("📦 Полные данные webhook:", JSON.stringify(req.body, null, 2));
 
   const data = req.body;
+  console.log("📦 Полные данные webhook:", JSON.stringify(data, null, 2));
 
-  // Проверяем, что есть сообщение
-  if (!data || !data.message) {
-    console.log("📨 Webhook ping received (no message)");
+  // 🔧 ИСПРАВЛЕНИЕ: UltraMSG использует data.data вместо data.message
+  if (!data || !data.data) {
+    console.log("📨 Webhook ping received (no message data)");
     return res.sendStatus(200);
   }
 
-  const from = data.message.from;
-  const text = data.message.body?.trim();
-  const isFromMe = data.message.fromMe;
+  const messageData = data.data;
+  const from = messageData.from; // Например: "77718526794@c.us"
+  const text = messageData.body?.trim();
+  const isFromMe = messageData.fromMe;
 
   console.log(`📩 Сообщение: from=${from}, text="${text}", fromMe=${isFromMe}`);
 
   // 🚫 Игнорируем сообщения, отправленные самим ботом
   if (isFromMe) {
     console.log("⏩ Игнорируем сообщение, отправленное ботом");
+    return res.sendStatus(200);
+  }
+
+  // 🚫 Игнорируем пустые сообщения
+  if (!text) {
+    console.log("⏩ Пустое сообщение, игнорируем");
     return res.sendStatus(200);
   }
 
@@ -180,7 +198,6 @@ app.post("/webhook-whatsapp", async (req, res) => {
 
   res.sendStatus(200);
 });
-
 // ====== Health check ======
 app.get("/", (req, res) => {
   res.json({ status: "ok", ts: new Date().toISOString() });
