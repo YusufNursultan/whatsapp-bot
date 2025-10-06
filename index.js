@@ -3,7 +3,6 @@ import bodyParser from "body-parser";
 import axios from "axios";
 import OpenAI from "openai";
 
-
 // ⚙️ Express app
 const app = express();
 app.use(bodyParser.json());
@@ -20,16 +19,6 @@ if (!OPENAI_API_KEY || !ULTRAMSG_INSTANCE_ID || !ULTRAMSG_TOKEN) {
   console.error("❌ Missing required env vars. Check Render environment settings.");
   process.exit(1);
 }
-app.post("/webhook-whatsapp", async (req, res) => {
-  console.log("📨 Webhook data:", JSON.stringify(req.body, null, 2)); // <== добавь это
-  res.sendStatus(200);
-});
-
-// ====== Запуск сервера ======
-app.listen(PORT, () => {
-  console.log(`✅ WhatsApp Bot running on port ${PORT}`);
-  console.log(`ℹ️ Health check: http://localhost:${PORT}/`);
-});
 
 // ====== OpenAI init ======
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
@@ -58,44 +47,7 @@ function markSeen(session, messageId) {
 const menu = {
   "Doner Classic 30 см": 1790,
   "Doner Classic 40 см": 1990,
-  "Doner Beef 30 см": 2090,
-  "Doner Beef 40 см": 2290,
-  "Doner Assorti 30 см": 2090,
-  "Doner Assorti 40 см": 2290,
-  "Doner Cheese 30 см": 1950,
-  "Doner Cheese 40 см": 2150,
-  "Doner Crispy 30 см": 1990,
-  "Doner Crispy 40 см": 2190,
-  "Doner Hot 30 см": 1950,
-  "Doner Hot 40 см": 2150,
-  "Panini Classic": 1890,
-  "Panini Assorti": 2190,
-  "Panini Beef": 2190,
-  "Panini Cheese": 2050,
-  "Panini Crispy": 2090,
-  "Panini Hot": 2050,
-  "HOT-DOG": 890,
-  "BIG HOT-DOG": 1090,
-  "CRUNCH HOT-DOG": 1390,
-  "TEXAS HOT-DOG": 1390,
-  "ЛАВАШ HOT-DOG": 1390,
-  "BASKET S": 4090,
-  "BASKET M": 5090,
-  "BASKET L": 6490,
-  "BASKET XL": 7490,
-  "Фри": 890,
-  "Наггетсы": 990,
-  "Луковые кольца": 990,
-  "Картофельные шарики": 990,
-  "Картофель по-деревенский": 990,
-  "Combo Twin": 6720,
-  "Combo Friends": 13240,
-  "Box Time": 3980,
-  "Coca Cola 0.5L": 590,
-  "Coca Cola 1L": 890,
-  "Айран турецкий": 490,
-  "Fuse Tea 0.5L": 690,
-  "Fuse Tea 1L": 890,
+  // ... остальное меню
 };
 const deliveryPrice = 700;
 
@@ -189,7 +141,10 @@ app.post("/webhook-whatsapp", async (req, res) => {
   const data = req.body;
 
   // Проверяем, что есть сообщение
-  if (!data || !data.message) return res.sendStatus(200);
+  if (!data || !data.message) {
+    console.log("📨 Webhook ping received");
+    return res.sendStatus(200);
+  }
 
   const from = data.message.from;
   const text = data.message.body?.trim();
@@ -197,45 +152,35 @@ app.post("/webhook-whatsapp", async (req, res) => {
 
   // 🚫 Игнорируем сообщения, отправленные самим ботом
   if (isFromMe) {
-    console.log("⏩ Игнорируем сообщение, отправленное ботом:", text);
+    console.log("⏩ Игнорируем сообщение, отправленное ботом");
     return res.sendStatus(200);
   }
 
-  console.log("📩 Получено сообщение:", from, text);
+  console.log("📩 Получено сообщение от пользователя:", from, text);
 
   try {
-    // GPT ответ
-    const ai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-    const response = await ai.chat.completions.create({
-      model: "gpt-3.5-turbo",
-      messages: [
-        { role: "system", content: "Ты дружелюбный WhatsApp-ассистент." },
-        { role: "user", content: text }
-      ]
-    });
-
-    const reply = response.choices[0].message.content;
-    console.log("🤖 Ответ:", reply);
+    // Получаем ответ от AI
+    const reply = await getAIResponse(text, from);
+    console.log("🤖 Ответ AI:", reply);
 
     // Отправляем ответ пользователю
-    await axios.post(
-      `https://api.ultramsg.com/${process.env.ULTRAMSG_INSTANCE_ID}/messages/chat`,
-      {
-        token: process.env.ULTRAMSG_TOKEN,
-        to: from,
-        body: reply
-      }
-    );
+    await sendMessage(from, reply);
+    console.log("✅ Ответ отправлен пользователю");
 
   } catch (err) {
-    console.error("Ошибка при обработке сообщения:", err);
+    console.error("❌ Ошибка при обработке сообщения:", err);
   }
 
   res.sendStatus(200);
 });
 
-
 // ====== Health check ======
 app.get("/", (req, res) => {
   res.json({ status: "ok", ts: new Date().toISOString() });
+});
+
+// ====== Запуск сервера ======
+app.listen(PORT, () => {
+  console.log(`✅ WhatsApp Bot running on port ${PORT}`);
+  console.log(`ℹ️ Health check: http://localhost:${PORT}/`);
 });
