@@ -6,7 +6,7 @@ const OPERATOR_PHONE = process.env.OPERATOR_PHONE;
 
 // Функция создания ссылки оплаты
 export function createKaspiPaymentLink(amount) {
-  const link = `https://kaspi.kz/pay/${SHOP_ALIAS}/${amount}`;
+  const link = `https://pay.kaspi.kz/pay/3ofujmgr?amount=${total}`;
   return link;
 }
 
