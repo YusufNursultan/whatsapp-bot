@@ -1,27 +1,49 @@
 // kaspi-link.js
 import 'dotenv/config';
 
-const SHOP_ALIAS = process.env.KASPI_SHOP_ALIAS || "AliDoner"; // твой Kaspi Pay логин
-const OPERATOR_PHONE = process.env.OPERATOR_PHONE;
+const CONFIG = {
+  SHOP_ALIAS: process.env.KASPI_SHOP_ALIAS || "AliDoner",
+  KASPI_PAY_BASE_URL: 'https://pay.kaspi.kz/pay/3ofujmgr'
+};
 
-// Функция создания ссылки оплаты
+/**
+ * Создает платежную ссылку Kaspi Pay
+ */
 export function createKaspiPaymentLink(amount) {
-  const link = `https://pay.kaspi.kz/pay/3ofujmgr?amount=${amount}`;
+  // Округляем сумму до целого числа
+  const roundedAmount = Math.round(Number(amount));
+  
+  if (isNaN(roundedAmount) || roundedAmount <= 0) {
+    throw new Error(`Неверная сумма для оплаты: ${amount}`);
+  }
+
+  const link = `${CONFIG.KASPI_PAY_BASE_URL}?amount=${roundedAmount}`;
+  console.log(`🔗 Generated Kaspi link for ${roundedAmount}₸: ${link}`);
   return link;
 }
 
-// Формирование текста чека
+/**
+ * Формирование текста чека
+ */
 export function formatReceipt(order, address, amount, deliveryPrice) {
   const total = amount + deliveryPrice;
+  
+  // Форматируем список товаров с количеством и общей стоимостью
+  const orderText = order.map((item, i) => {
+    const itemTotal = item.price * (item.quantity || 1);
+    return `${i + 1}. ${item.name}${item.quantity > 1 ? ` x${item.quantity}` : ''} — ${itemTotal}₸`;
+  }).join("\n");
+
   return `
 🧾 *Чек Ali Doner Aktau*
 
-📦 Заказ:
-${order.map((item, i) => `${i + 1}. ${item.name} — ${item.price}₸`).join("\n")}
+📦 *Ваш заказ:*
+${orderText}
 
-🚚 Доставка: ${deliveryPrice}₸
-🏠 Адрес: ${address}
-💰 Итого: ${total}₸
+🚚 *Доставка:* ${deliveryPrice}₸
+🏠 *Адрес:* ${address}
+────────────────
+💰 *Итого к оплате:* ${total}₸
 
 Спасибо за заказ! 🌯🍔🍟
 `;
