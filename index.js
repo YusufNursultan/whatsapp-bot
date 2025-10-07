@@ -3,7 +3,7 @@ import bodyParser from "body-parser";
 import axios from "axios";
 import OpenAI from "openai";
 import { v4 as uuidv4 } from "uuid";
-import { createKaspiPaymentLink, formatReceipt } from "./kaspi.js"; // ✅ локальная функция Kaspi
+import { createKaspiPaymentLink, formatReceipt } from "./kaspi-link.js"; // ✅ локальная функция Kaspi
 
 // ⚙️ Express app
 const app = express();
