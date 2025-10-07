@@ -1,24 +1,14 @@
 // kaspi-link.js
 import 'dotenv/config';
 
-const CONFIG = {
-  SHOP_ALIAS: process.env.KASPI_SHOP_ALIAS || "AliDoner",
-  KASPI_PAY_BASE_URL: 'https://pay.kaspi.kz/pay/3ofujmgr'
-};
 
 /**
- * Создает платежную ссылку Kaspi Pay
+ * Создает платежную ссылку Kaspi Pay - УПРОЩЕННАЯ ВЕРСИЯ
  */
 export function createKaspiPaymentLink(amount) {
-  // Округляем сумму до целого числа
-  const roundedAmount = Math.round(Number(amount));
-  
-  if (isNaN(roundedAmount) || roundedAmount <= 0) {
-    throw new Error(`Неверная сумма для оплаты: ${amount}`);
-  }
-
-  const link = `${CONFIG.KASPI_PAY_BASE_URL}?amount=${roundedAmount}`;
-  console.log(`🔗 Generated Kaspi link for ${roundedAmount}₸: ${link}`);
+  // Просто создаем ссылку без валидации
+  const link = `https://pay.kaspi.kz/pay/3ofujmgr?amount`;
+  console.log(`🔗 Generated Kaspi link: ${link}`);
   return link;
 }
 
