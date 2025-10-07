@@ -2,6 +2,7 @@ import express from "express";
 import bodyParser from "body-parser";
 import axios from "axios";
 import OpenAI from "openai";
+import { v4 as uuidv4 } from "uuid";
 
 // ⚙️ Express app
 const app = express();
@@ -13,39 +14,28 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const ULTRAMSG_INSTANCE_ID = process.env.ULTRAMSG_INSTANCE_ID;
 const ULTRAMSG_TOKEN = process.env.ULTRAMSG_TOKEN;
 const OPERATOR_PHONE = process.env.OPERATOR_PHONE;
+const KASPI_API_KEY = process.env.KASPI_API_KEY;
+const KASPI_MERCHANT_ID = process.env.KASPI_MERCHANT_ID;
 
-// Проверка переменных окружения
+// Проверка обязательных ключей
 if (!OPENAI_API_KEY || !ULTRAMSG_INSTANCE_ID || !ULTRAMSG_TOKEN) {
   console.error("❌ Missing required env vars. Check Render environment settings.");
   process.exit(1);
 }
 
-// ====== OpenAI init ======
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
 // ====== In-memory sessions ======
-const sessions = {}; // { phone: { conversation: [], cart: [], seen:Set, seenQueue:[] } }
+const sessions = {}; // { phone: { cart: [], address: "", orderId, total, conversation: [] } }
 
-function ensureSession(from) {
-  if (!sessions[from]) {
-    sessions[from] = { conversation: [], cart: [], seen: new Set(), seenQueue: [] };
-  }
-  return sessions[from];
+function ensureSession(phone) {
+  if (!sessions[phone]) sessions[phone] = { cart: [], conversation: [] };
+  return sessions[phone];
 }
 
-function markSeen(session, messageId) {
-  if (!messageId) return;
-  session.seen.add(messageId);
-  session.seenQueue.push(messageId);
-  if (session.seenQueue.length > 500) {
-    const old = session.seenQueue.shift();
-    session.seen.delete(old);
-  }
-}
-
-// ====== Menu ======
+// ====== MENU ======
 const menu = {
-   "Doner Classic 30 см": 1790,
+  "Doner Classic 30 см": 1790,
   "Doner Classic 40 см": 1990,
   "Doner Beef 30 см": 2090,
   "Doner Beef 40 см": 2290,
@@ -88,74 +78,64 @@ const menu = {
 };
 const deliveryPrice = 700;
 
-// ====== System prompt ======
+// ====== SYSTEM PROMPT ======
 function buildSystemPrompt(phone) {
   const cart = sessions[phone]?.cart || [];
-  const cartText = cart.length
-    ? `Корзина клиента:\n${cart
-        .map((i, idx) => `${idx + 1}. ${i.name} x${i.quantity} = ${i.price * i.quantity}₸`)
-        .join("\n")}\n\nСумма (без доставки): ${cart.reduce((s, i) => s + i.price * i.quantity, 0)}₸`
-    : "Корзина пока пуста.";
+  const cartText =
+    cart.length > 0
+      ? cart
+          .map(
+            (i, idx) => `${idx + 1}. ${i.name} x${i.quantity} = ${i.price * i.quantity}₸`
+          )
+          .join("\n")
+      : "🛒 Корзина пуста / Себет бос / Cart is empty.";
 
   const menuText = Object.entries(menu)
     .map(([k, v]) => `- ${k}: ${v}₸`)
     .join("\n");
 
   return `
-Ты — оператор кафе "Ali Doner Aktau". Говори по-человечески, используй немного эмодзи 🍔🌯🍟🚚.
-Задача — принять заказ через WhatsApp и оформить доставку.
+Ты — оператор кафе "Ali Doner Aktau" 🍔🌯.  
+Говори на языке клиента (қазақша / по-русски / English).  
+Будь вежлив, пиши коротко, дружелюбно и с эмодзи.  
 
-ПРАВИЛА:
-1) Показывай меню по запросу "меню".
-2) Добавляй блюда в корзину, уточняй параметры.
-3) После добавления предложи оформить заказ.
-4) Проси адрес и подтверждение.
-5) После подтверждения — выведи чек: сумма еды, доставка ${deliveryPrice}₸, адрес, итог.
-6) Не начинай разговор заново и не повторяйся.
+📋 Твоя задача:
+— показать меню по запросу ("меню", "menu", "тағамдар")
+— добавить блюда в корзину
+— уточнить количество
+— предложить оформить заказ
+— запросить адрес и оплату
+— создать оплату через Kaspi
+— после успешной оплаты выдать чек клиенту и оператору (${OPERATOR_PHONE})
+
+🚚 Доставка: ${deliveryPrice}₸
+
+🧾 Текущий заказ:
+${cartText}
 
 МЕНЮ:
 ${menuText}
-
-Доставка: ${deliveryPrice}₸
-${cartText}
-  `.trim();
+`;
 }
 
 // ====== sendMessage ======
 async function sendMessage(to, text) {
   try {
-    // 🔧 Убедимся что номер в правильном формате
-    const cleanTo = to.replace('@c.us', ''); // Убираем суффикс если есть
-    
+    const cleanTo = to.replace("@c.us", "");
     const payload = new URLSearchParams({
       token: ULTRAMSG_TOKEN,
       to: cleanTo,
       body: text,
     }).toString();
 
-    console.log(`📤 Отправка сообщения на ${cleanTo}: ${text.substring(0, 50)}...`);
-
     const resp = await axios.post(
       `https://api.ultramsg.com/${ULTRAMSG_INSTANCE_ID}/messages/chat`,
       payload,
-      { 
-        headers: { "Content-Type": "application/x-www-form-urlencoded" }, 
-        timeout: 15000 
-      }
+      { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
     );
-
-    console.log("✅ Сообщение отправлено, ответ UltraMSG:", resp.data);
-
-    const sentId = resp.data?.id || resp.data?.messageId;
-    if (sentId) {
-      const session = ensureSession(to);
-      markSeen(session, sentId);
-    }
-
     return resp.data;
   } catch (err) {
     console.error("❌ sendMessage error:", err?.response?.data || err.message);
-    throw err; // 🔧 Важно: пробрасываем ошибку дальше
   }
 }
 
@@ -172,7 +152,7 @@ async function getAIResponse(userMessage, phone) {
       model: "gpt-4o-mini",
       messages: [{ role: "system", content: system }, ...recent],
       temperature: 0.7,
-      max_tokens: 800,
+      max_tokens: 700,
     });
 
     const reply = completion.choices[0].message.content.trim();
@@ -180,68 +160,105 @@ async function getAIResponse(userMessage, phone) {
     return reply;
   } catch (err) {
     console.error("❌ OpenAI error:", err?.response?.data || err.message);
-    return "Извините, возникла ошибка. Попробуйте позже.";
+    return "Извините, произошла ошибка.";
   }
 }
 
-// ====== Webhook ======
-app.post("/webhook-whatsapp", async (req, res) => {
-  console.log("🟢 Webhook вызван!");
-
-  const data = req.body;
-  console.log("📦 Полные данные webhook:", JSON.stringify(data, null, 2));
-
-  // 🔧 ИСПРАВЛЕНИЕ: UltraMSG использует data.data вместо data.message
-  if (!data || !data.data) {
-    console.log("📨 Webhook ping received (no message data)");
-    return res.sendStatus(200);
-  }
-
-  const messageData = data.data;
-  const from = messageData.from; // Например: "77718526794@c.us"
-  const text = messageData.body?.trim();
-  const isFromMe = messageData.fromMe;
-
-  console.log(`📩 Сообщение: from=${from}, text="${text}", fromMe=${isFromMe}`);
-
-  // 🚫 Игнорируем сообщения, отправленные самим ботом
-  if (isFromMe) {
-    console.log("⏩ Игнорируем сообщение, отправленное ботом");
-    return res.sendStatus(200);
-  }
-
-  // 🚫 Игнорируем пустые сообщения
-  if (!text) {
-    console.log("⏩ Пустое сообщение, игнорируем");
-    return res.sendStatus(200);
-  }
-
-  console.log("🔍 Начинаем обработку сообщения от пользователя");
-
+// ====== Kaspi Payment ======
+async function createKaspiPayment(amount, orderId) {
   try {
-    // Получаем ответ от AI
-    console.log("🤖 Запрос к OpenAI...");
-    const reply = await getAIResponse(text, from);
-    console.log("✅ Ответ AI получен:", reply.substring(0, 100) + "...");
-
-    // Отправляем ответ пользователю
-    console.log("📤 Отправка сообщения через UltraMSG...");
-    await sendMessage(from, reply);
-    console.log("✅ Ответ отправлен пользователю");
-
+    const resp = await axios.post(
+      "https://api.kaspi.kz/payments/v2/orders",
+      {
+        amount,
+        currency: "KZT",
+        description: `Оплата заказа №${orderId}`,
+        merchantId: KASPI_MERCHANT_ID,
+        callbackUrl: "https://whatsapp-bot-opz3.onrender.com/kaspi-webhook",
+      },
+      {
+        headers: { Authorization: `Bearer ${KASPI_API_KEY}` },
+      }
+    );
+    return resp.data.paymentUrl; // URL для оплаты
   } catch (err) {
-    console.error("❌ Ошибка при обработке сообщения:", err);
+    console.error("❌ Kaspi API error:", err?.response?.data || err.message);
+    return null;
   }
+}
 
+// ====== Kaspi webhook ======
+app.post("/kaspi-webhook", async (req, res) => {
+  const { orderId, status, amount } = req.body;
+  console.log("💰 Kaspi webhook:", req.body);
+
+  if (status === "SUCCESS") {
+    const session = Object.values(sessions).find((s) => s.orderId === orderId);
+    if (session) {
+      const receipt = `
+✅ Оплата получена: ${amount}₸
+🧾 Заказ:
+${session.cart.map((i) => `${i.name} x${i.quantity}`).join("\n")}
+🚚 Доставка: ${deliveryPrice}₸
+🏠 Адрес: ${session.address}
+💳 Итого: ${session.total}₸
+      `.trim();
+
+      await sendMessage(session.phone, `Рақмет 🙏 Спасибо за оплату!\n${receipt}`);
+      await sendMessage(OPERATOR_PHONE, `📦 Новый оплаченный заказ:\n${receipt}`);
+    }
+  }
   res.sendStatus(200);
 });
-// ====== Health check ======
-app.get("/", (req, res) => {
-  res.json({ status: "ok", ts: new Date().toISOString() });
+
+// ====== Webhook WhatsApp ======
+app.post("/webhook-whatsapp", async (req, res) => {
+  const data = req.body?.data;
+  if (!data) return res.sendStatus(200);
+
+  const msg = data.body?.trim();
+  const from = data.from;
+  const lower = msg.toLowerCase();
+
+  if (data.fromMe || !msg) return res.sendStatus(200);
+
+  const session = ensureSession(from);
+
+  // 💳 Если клиент хочет оплатить
+  if (lower.includes("оплат") || lower.includes("kaspi")) {
+    const total =
+      (session.cart?.reduce((s, i) => s + i.price * i.quantity, 0) || 0) + deliveryPrice;
+    if (total === 0) {
+      await sendMessage(from, "🛒 Ваша корзина пуста.");
+      return res.sendStatus(200);
+    }
+
+    const orderId = uuidv4();
+    session.orderId = orderId;
+    session.total = total;
+
+    const link = await createKaspiPayment(total, orderId);
+    if (link) {
+      await sendMessage(
+        from,
+        `💳 Для оплаты перейдите по ссылке:\n${link}\n\nПосле оплаты бот подтвердит автоматически ✅`
+      );
+    } else {
+      await sendMessage(from, "❌ Не удалось создать ссылку Kaspi.");
+    }
+    return res.sendStatus(200);
+  }
+
+  // 🤖 AI обработка
+  const reply = await getAIResponse(msg, from);
+  await sendMessage(from, reply);
+  res.sendStatus(200);
 });
 
-// ====== Запуск сервера ======
+// ====== Health Check ======
+app.get("/", (req, res) => res.json({ status: "ok" }));
+
+// ====== START SERVER ======
 app.listen(PORT, () => {
   console.log(`✅ WhatsApp Bot running on port ${PORT}`);
-  console.log(`ℹ️ Health check: http://localhost:${PORT}/`);
 });
