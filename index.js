@@ -3,6 +3,7 @@ import bodyParser from "body-parser";
 import axios from "axios";
 import OpenAI from "openai";
 import { v4 as uuidv4 } from "uuid";
+import { generateKaspiPaymentLink } from "./kaspi.js"; // ✅ локальная функция Kaspi
 
 // ⚙️ Express app
 const app = express();
@@ -14,8 +15,7 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const ULTRAMSG_INSTANCE_ID = process.env.ULTRAMSG_INSTANCE_ID;
 const ULTRAMSG_TOKEN = process.env.ULTRAMSG_TOKEN;
 const OPERATOR_PHONE = process.env.OPERATOR_PHONE;
-const KASPI_API_KEY = process.env.KASPI_API_KEY;
-const KASPI_MERCHANT_ID = process.env.KASPI_MERCHANT_ID;
+const deliveryPrice = 700;
 
 // Проверка обязательных ключей
 if (!OPENAI_API_KEY || !ULTRAMSG_INSTANCE_ID || !ULTRAMSG_TOKEN) {
@@ -76,7 +76,6 @@ const menu = {
   "Fuse Tea 0.5L": 690,
   "Fuse Tea 1L": 890,
 };
-const deliveryPrice = 700;
 
 // ====== SYSTEM PROMPT ======
 function buildSystemPrompt(phone) {
@@ -95,20 +94,22 @@ function buildSystemPrompt(phone) {
     .join("\n");
 
   return `
+Сен — Ali Doner Aktau 🍔🌯 операторысың.  
 Ты — оператор кафе "Ali Doner Aktau" 🍔🌯.  
+You are the Ali Doner Aktau assistant.  
+
 Говори на языке клиента (қазақша / по-русски / English).  
-Будь вежлив, пиши коротко, дружелюбно и с эмодзи.  
+Будь вежлив, дружелюбен и краток.  
 
 📋 Твоя задача:
-— показать меню по запросу ("меню", "menu", "тағамдар")
+— показать меню ("меню", "menu", "тағамдар")
 — добавить блюда в корзину
 — уточнить количество
 — предложить оформить заказ
-— запросить адрес и оплату
-— создать оплату через Kaspi
-— после успешной оплаты выдать чек клиенту и оператору (${OPERATOR_PHONE})
-
-🚚 Доставка: ${deliveryPrice}₸
+— запросить адрес
+— рассчитать итог (включая доставку ${deliveryPrice}₸)
+— выдать чек и ссылку Kaspi для оплаты
+— отправить копию чека оператору (${OPERATOR_PHONE})
 
 🧾 Текущий заказ:
 ${cartText}
@@ -164,53 +165,6 @@ async function getAIResponse(userMessage, phone) {
   }
 }
 
-// ====== Kaspi Payment ======
-async function createKaspiPayment(amount, orderId) {
-  try {
-    const resp = await axios.post(
-      "https://api.kaspi.kz/payments/v2/orders",
-      {
-        amount,
-        currency: "KZT",
-        description: `Оплата заказа №${orderId}`,
-        merchantId: KASPI_MERCHANT_ID,
-        callbackUrl: "https://whatsapp-bot-opz3.onrender.com/kaspi-webhook",
-      },
-      {
-        headers: { Authorization: `Bearer ${KASPI_API_KEY}` },
-      }
-    );
-    return resp.data.paymentUrl; // URL для оплаты
-  } catch (err) {
-    console.error("❌ Kaspi API error:", err?.response?.data || err.message);
-    return null;
-  }
-}
-
-// ====== Kaspi webhook ======
-app.post("/kaspi-webhook", async (req, res) => {
-  const { orderId, status, amount } = req.body;
-  console.log("💰 Kaspi webhook:", req.body);
-
-  if (status === "SUCCESS") {
-    const session = Object.values(sessions).find((s) => s.orderId === orderId);
-    if (session) {
-      const receipt = `
-✅ Оплата получена: ${amount}₸
-🧾 Заказ:
-${session.cart.map((i) => `${i.name} x${i.quantity}`).join("\n")}
-🚚 Доставка: ${deliveryPrice}₸
-🏠 Адрес: ${session.address}
-💳 Итого: ${session.total}₸
-      `.trim();
-
-      await sendMessage(session.phone, `Рақмет 🙏 Спасибо за оплату!\n${receipt}`);
-      await sendMessage(OPERATOR_PHONE, `📦 Новый оплаченный заказ:\n${receipt}`);
-    }
-  }
-  res.sendStatus(200);
-});
-
 // ====== Webhook WhatsApp ======
 app.post("/webhook-whatsapp", async (req, res) => {
   const data = req.body?.data;
@@ -228,6 +182,7 @@ app.post("/webhook-whatsapp", async (req, res) => {
   if (lower.includes("оплат") || lower.includes("kaspi")) {
     const total =
       (session.cart?.reduce((s, i) => s + i.price * i.quantity, 0) || 0) + deliveryPrice;
+
     if (total === 0) {
       await sendMessage(from, "🛒 Ваша корзина пуста.");
       return res.sendStatus(200);
@@ -237,15 +192,23 @@ app.post("/webhook-whatsapp", async (req, res) => {
     session.orderId = orderId;
     session.total = total;
 
-    const link = await createKaspiPayment(total, orderId);
-    if (link) {
-      await sendMessage(
-        from,
-        `💳 Для оплаты перейдите по ссылке:\n${link}\n\nПосле оплаты бот подтвердит автоматически ✅`
-      );
-    } else {
-      await sendMessage(from, "❌ Не удалось создать ссылку Kaspi.");
-    }
+    // ✅ создаём ссылку Kaspi
+    const paymentLink = generateKaspiPaymentLink(total);
+
+    const receipt = `
+🧾 *Ваш заказ оформлен!*
+------------------------------
+${session.cart.map(i => `🍔 ${i.name} x${i.quantity} = ${i.price * i.quantity}₸`).join("\n")}
+------------------------------
+🚚 Доставка: ${deliveryPrice}₸
+💰 Итого: *${total}₸*
+
+💳 Оплатить Kaspi:
+${paymentLink}
+`;
+
+    await sendMessage(from, receipt);
+    await sendMessage(OPERATOR_PHONE, `📦 Новый заказ от ${from}\n${receipt}`);
     return res.sendStatus(200);
   }
 

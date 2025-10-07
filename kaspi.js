@@ -1,30 +1,19 @@
-import axios from "axios";
+// kaspi.js
+require("dotenv").config();
 
-const KASPI_API_URL = process.env.KASPI_API_URL;
-const KASPI_API_KEY = process.env.KASPI_API_KEY;
+const KASPI_PAY_LINK = "https://pay.kaspi.kz/pay/3ofujmgr"; // твоя постоянная ссылка
 
-export async function createKaspiPayment(orderId, amount, description) {
-  try {
-    const resp = await axios.post(
-      `${KASPI_API_URL}/create`,
-      {
-        orderId,
-        amount,
-        description,
-        currency: "KZT",
-        redirectUrl: "https://whatsapp.com", // куда вернётся клиент после оплаты
-      },
-      {
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${KASPI_API_KEY}`,
-        },
-      }
-    );
-
-    return resp.data; // Обычно содержит ссылку на оплату
-  } catch (err) {
-    console.error("❌ Kaspi API error:", err.response?.data || err.message);
-    throw err;
+function generateKaspiPaymentLink(totalAmount) {
+  if (!totalAmount || isNaN(totalAmount)) {
+    throw new Error("Некорректная сумма для Kaspi оплаты");
   }
+
+  // округлим на случай копеек
+  const amount = Math.round(totalAmount);
+
+  // добавляем параметр суммы в ссылку
+  return `${KASPI_PAY_LINK}?amount=${amount}`;
 }
+
+module.exports = { generateKaspiPaymentLink };
+
