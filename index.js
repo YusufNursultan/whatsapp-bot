@@ -139,6 +139,8 @@ async function sendMessage(to, text) {
   } catch (err) {
     console.error("❌ sendMessage error:", err?.response?.data || err.message);
   }
+  console.log("Ссылка на Kaspi:", link);
+
 }
 
 // ====== getAIResponse ======
