@@ -127,6 +127,10 @@ ${cartText}
 1. Цены только из меню
 2. При завершении заказа напомни про оплату и доставку
 3. Будь вежливым и профессиональным
+4. НЕ говори "заказ принят" или "заказ оформлен" пока не сформирован финальный чек с Kaspi ссылкой
+5. После выбора оплаты Kaspi - переходи к финальному оформлению заказа
+6. Корзина очищается только после отправки Kaspi ссылки
+7. Ты должен проверить чек после оплаты6 
 `;
 }
 
@@ -202,41 +206,47 @@ function handleClearCart(phone) {
   return "🛒 Корзина очищена. Что бы вы хотели заказать?";
 }
 
-// Webhook WhatsApp
+// В начале файла остаются все импорты и конфиги без изменений
+
+// ====== Новая функция проверки оплаты Kaspi ======
+// Пока пример через имитацию API (заменить на реальный Kaspi webhook или API)
+async function checkKaspiPayment(orderId) {
+  // TODO: заменить на реальный запрос к Kaspi API
+  // Пример ответа:
+  // { status: "SUCCESS" | "PENDING" | "FAILED" }
+  return "SUCCESS"; // для теста считаем, что оплата прошла
+}
+
+// ====== Webhook WhatsApp ======
 app.post("/webhook-whatsapp", async (req, res) => {
   try {
-    console.log("📨 Received webhook:", JSON.stringify(req.body, null, 2));
-    
     const data = req.body?.data;
-    if (!data) {
-      return res.sendStatus(200);
-    }
+    if (!data) return res.sendStatus(200);
 
     const msg = data.body?.trim();
     const from = data.from;
-    
-    if (data.fromMe || !msg) {
-      return res.sendStatus(200);
-    }
+
+    if (data.fromMe || !msg) return res.sendStatus(200);
 
     const session = ensureSession(from);
     const lowerMsg = msg.toLowerCase();
 
+    // Очистка корзины
     if (lowerMsg.includes("очистить корзину") || lowerMsg === "очистить") {
       const reply = handleClearCart(from);
       await sendMessage(from, reply);
       return res.sendStatus(200);
     }
 
-    if (lowerMsg.includes("оплат") || lowerMsg.includes("kaspi") || 
-        lowerMsg.includes("наличн") || lowerMsg.includes("банк") ||
-        (lowerMsg.includes("заказ") && lowerMsg.includes("готов"))) {
-      
+    // Оплата
+    if (lowerMsg.includes("оплат") || lowerMsg.includes("kaspi") ||
+        lowerMsg.includes("наличн") || lowerMsg.includes("банк")) {
+
       session.paymentMethod = lowerMsg.includes("kaspi") ? "Kaspi" : "Наличные";
 
-      const cartTotal = session.cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+      const cartTotal = session.cart.reduce((sum, i) => sum + i.price * i.quantity, 0);
       const total = Math.round(cartTotal + deliveryPrice);
-      
+
       if (cartTotal === 0) {
         await sendMessage(from, "🛒 *Ваша корзина пуста*. Добавьте товары перед оформлением заказа.");
         return res.sendStatus(200);
@@ -255,15 +265,14 @@ app.post("/webhook-whatsapp", async (req, res) => {
 
       if (session.paymentMethod === "Kaspi") {
         const paymentLink = createKaspiPaymentLink(total);
-        
-        // Отправляем чек и ссылку отдельными сообщениями
+
         await sendMessage(from, receipt);
-        
+
         const paymentMessage = `
 💳 *ОПЛАТА KASPI*
 
-💰 Сумма: ${total}₸
-🔗 Ссылка для оплаты: ${paymentLink}
+💰 Сумма: *${total}₸*
+🔗 Ссылка для оплаты: *${paymentLink}*
 
 *Инструкция:*
 1. Нажмите на ссылку выше
@@ -273,8 +282,22 @@ app.post("/webhook-whatsapp", async (req, res) => {
 📞 *Номер заказа:* #${orderId}
 `;
         await sendMessage(from, paymentMessage);
-        
-      } else {
+
+        // Проверка оплаты (имитация)
+        const paymentStatus = await checkKaspiPayment(orderId);
+        if (paymentStatus === "SUCCESS") {
+          const paidReceipt = `✅ *Оплата получена!*  
+🧾 Заказ:
+${session.cart.map(i => `${i.name} x${i.quantity}`).join("\n")}
+🚚 Доставка: ${deliveryPrice}₸
+💳 Итого: *${total}₸*
+🏠 Адрес: ${session.address}`;
+
+          await sendMessage(from, paidReceipt);
+          await sendMessage(OPERATOR_PHONE, `📦 *НОВЫЙ ОПЛАЧЕННЫЙ ЗАКАЗ #${orderId}*\n${paidReceipt}`);
+        }
+
+      } else { // Наличные
         receipt += `\n\n💵 *Оплата наличными при получении*`;
         receipt += `\n📞 *Номер заказа:* #${orderId}`;
         receipt += `\n⏰ *Время приготовления:* 25-35 минут`;
@@ -283,26 +306,28 @@ app.post("/webhook-whatsapp", async (req, res) => {
 
       const operatorMessage = `📦 *НОВЫЙ ЗАКАЗ #${orderId}*\nОт: ${from}\n${receipt}\nОплата: ${session.paymentMethod}`;
       await sendMessage(OPERATOR_PHONE, operatorMessage);
-      
+
       session.cart = [];
-      
       return res.sendStatus(200);
     }
 
+    // Обработка адреса
     if (lowerMsg.includes("адрес") || session.conversation.some(m => 
         m.content.includes("адрес") && m.role === "assistant")) {
       session.address = msg;
     }
 
+    // AI ответ
     const reply = await getAIResponse(msg, from);
     await sendMessage(from, reply);
-    
+
     res.sendStatus(200);
   } catch (error) {
     console.error("❌ Webhook error:", error);
     res.status(500).send("Internal Server Error");
   }
 });
+
 
 app.get("/status", (req, res) => {
   res.json({ 
