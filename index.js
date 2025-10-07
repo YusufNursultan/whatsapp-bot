@@ -3,7 +3,7 @@ import bodyParser from "body-parser";
 import axios from "axios";
 import OpenAI from "openai";
 import { v4 as uuidv4 } from "uuid";
-import { generateKaspiPaymentLink } from "./kaspi.js"; // ✅ локальная функция Kaspi
+import { createKaspiPaymentLink, formatReceipt } from "./kaspi.js"; // ✅ локальная функция Kaspi
 
 // ⚙️ Express app
 const app = express();
@@ -193,7 +193,7 @@ app.post("/webhook-whatsapp", async (req, res) => {
     session.total = total;
 
     // ✅ создаём ссылку Kaspi
-    const paymentLink = generateKaspiPaymentLink(total);
+    const paymentLink = createKaspiPaymentLink(total);
 
     const receipt = `
 🧾 *Ваш заказ оформлен!*
