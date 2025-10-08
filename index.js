@@ -12,7 +12,7 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const ULTRAMSG_INSTANCE_ID = process.env.ULTRAMSG_INSTANCE_ID;
 const ULTRAMSG_TOKEN = process.env.ULTRAMSG_TOKEN;
 const OPERATOR_PHONE = process.env.OPERATOR_PHONE;
-const KASPI_PHONE = process.env.KASPI_PHONE || "77066461684"; // Номер Kaspi для переводов
+const KASPI_PHONE = process.env.KASPI_PHONE || "77777777777"; // Номер Kaspi для переводов
 const deliveryPrice = 700;
 
 // Валидация env переменных
@@ -147,23 +147,54 @@ ${menuText}
 // Парсинг заказа из сообщения клиента
 function parseOrder(msg) {
   const items = [];
-  const lowerMsg = msg.toLowerCase();
+  const normalizedMsg = msg.toLowerCase()
+    .replace(/ё/g, 'е')
+    .replace(/\s+/g, ' ')
+    .replace(/см/g, ' см')
+    .replace(/cm/g, ' см')
+    .trim();
+  
+  console.log(`🔍 Parsing: "${normalizedMsg}"`);
   
   // Ищем упоминания блюд из меню
   for (const [itemName, price] of Object.entries(menu)) {
-    const lowerItemName = itemName.toLowerCase();
+    const normalizedItemName = itemName.toLowerCase()
+      .replace(/ё/g, 'е')
+      .replace(/\s+/g, ' ')
+      .trim();
     
-    // Проверяем есть ли название блюда в сообщении
-    if (lowerMsg.includes(lowerItemName)) {
-      // Ищем количество (цифра перед или после названия)
-      const quantityMatch = msg.match(/(\d+)\s*х?\s*|х\s*(\d+)/i);
-      const quantity = quantityMatch ? parseInt(quantityMatch[1] || quantityMatch[2]) : 1;
+    // Гибкий поиск: убираем пробелы для сравнения
+    const msgNoSpaces = normalizedMsg.replace(/\s/g, '');
+    const itemNoSpaces = normalizedItemName.replace(/\s/g, '');
+    
+    // Проверяем вхождение (без пробелов)
+    if (msgNoSpaces.includes(itemNoSpaces) || normalizedMsg.includes(normalizedItemName)) {
+      // Ищем количество
+      const quantityPatterns = [
+        /(\d+)\s*шт/i,
+        /(\d+)\s*х/i,
+        /х\s*(\d+)/i,
+        /(\d+)\s+[а-яa-z]/i
+      ];
+      
+      let quantity = 1;
+      for (const pattern of quantityPatterns) {
+        const match = msg.match(pattern);
+        if (match) {
+          quantity = parseInt(match[1]);
+          break;
+        }
+      }
+      
+      console.log(`✅ Found: ${itemName} x${quantity}`);
       
       items.push({
         name: itemName,
         price: price,
         quantity: quantity
       });
+      
+      break; // Нашли блюдо, выходим из цикла
     }
   }
   
@@ -272,25 +303,29 @@ app.post("/webhook-whatsapp", async (req, res) => {
       return res.sendStatus(200);
     }
 
-    // === ПАРСИНГ ЗАКАЗА ===
-    const parsedItems = parseOrder(msg);
-    if (parsedItems.length > 0) {
-      parsedItems.forEach(item => {
-        const existingItem = session.cart.find(i => i.name === item.name);
-        if (existingItem) {
-          existingItem.quantity += item.quantity;
-        } else {
-          session.cart.push(item);
-        }
-      });
+    // === ПАРСИНГ ЗАКАЗА (проверяем в любом случае, кроме команд) ===
+    if (!lowerMsg.includes("оформ") && !lowerMsg.includes("готов") && 
+        !lowerMsg.includes("меню") && !session.awaitingAddress) {
       
-      const cartText = session.cart.map((item, idx) => 
-        `${idx + 1}. ${item.name} x${item.quantity}`
-      ).join("\n");
-      const total = session.cart.reduce((sum, i) => sum + i.price * i.quantity, 0);
-      
-      await sendMessage(from, `✅ Добавлено в корзину!\n\n${cartText}\n\n💰 Сумма: ${total}₸\n\nХотите что-то еще или оформляем заказ?`);
-      return res.sendStatus(200);
+      const parsedItems = parseOrder(msg);
+      if (parsedItems.length > 0) {
+        parsedItems.forEach(item => {
+          const existingItem = session.cart.find(i => i.name === item.name);
+          if (existingItem) {
+            existingItem.quantity += item.quantity;
+          } else {
+            session.cart.push(item);
+          }
+        });
+        
+        const cartText = session.cart.map((item, idx) => 
+          `${idx + 1}. ${item.name} x${item.quantity}`
+        ).join("\n");
+        const total = session.cart.reduce((sum, i) => sum + i.price * i.quantity, 0);
+        
+        await sendMessage(from, `✅ Добавлено в корзину!\n\n${cartText}\n\n💰 Сумма: ${total}₸\n\nХотите что-то еще или оформляем заказ?`);
+        return res.sendStatus(200);
+      }
     }
 
     // === ОФОРМЛЕНИЕ ЗАКАЗА ===
