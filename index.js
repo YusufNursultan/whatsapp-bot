@@ -303,34 +303,33 @@ app.post("/webhook-whatsapp", async (req, res) => {
       return res.sendStatus(200);
     }
 
-    // === ПАРСИНГ ЗАКАЗА (проверяем в любом случае, кроме команд) ===
-    if (!lowerMsg.includes("оформ") && !lowerMsg.includes("готов") && 
-        !lowerMsg.includes("меню") && !session.awaitingAddress) {
+    // === ПАРСИНГ ЗАКАЗА - проверяем ВСЕГДА (кроме команд оплаты и адреса) ===
+    const parsedItems = parseOrder(msg);
+    if (parsedItems.length > 0 && !session.awaitingAddress) {
+      parsedItems.forEach(item => {
+        const existingItem = session.cart.find(i => i.name === item.name);
+        if (existingItem) {
+          existingItem.quantity += item.quantity;
+        } else {
+          session.cart.push(item);
+        }
+      });
       
-      const parsedItems = parseOrder(msg);
-      if (parsedItems.length > 0) {
-        parsedItems.forEach(item => {
-          const existingItem = session.cart.find(i => i.name === item.name);
-          if (existingItem) {
-            existingItem.quantity += item.quantity;
-          } else {
-            session.cart.push(item);
-          }
-        });
-        
-        const cartText = session.cart.map((item, idx) => 
-          `${idx + 1}. ${item.name} x${item.quantity}`
-        ).join("\n");
-        const total = session.cart.reduce((sum, i) => sum + i.price * i.quantity, 0);
-        
-        await sendMessage(from, `✅ Добавлено в корзину!\n\n${cartText}\n\n💰 Сумма: ${total}₸\n\nХотите что-то еще или оформляем заказ?`);
-        return res.sendStatus(200);
-      }
+      console.log(`📦 Cart updated:`, session.cart);
+      
+      const cartText = session.cart.map((item, idx) => 
+        `${idx + 1}. ${item.name} x${item.quantity}`
+      ).join("\n");
+      const total = session.cart.reduce((sum, i) => sum + i.price * i.quantity, 0);
+      
+      await sendMessage(from, `✅ Добавлено в корзину!\n\n${cartText}\n\n💰 Сумма: ${total}₸\n\nХотите что-то еще или оформляем заказ?`);
+      return res.sendStatus(200);
     }
 
     // === ОФОРМЛЕНИЕ ЗАКАЗА ===
     if (lowerMsg.includes("оформ") || lowerMsg.includes("заказ") || 
-        lowerMsg.includes("готов") || lowerMsg.includes("оплат")) {
+        lowerMsg.includes("готов") || lowerMsg.includes("оплат") ||
+        lowerMsg === "ничего" || lowerMsg === "нет" || lowerMsg === "всё" || lowerMsg === "все") {
       
       if (session.cart.length === 0) {
         await sendMessage(from, "🛒 Ваша корзина пуста. Добавьте товары перед оформлением заказа.");
@@ -357,7 +356,7 @@ app.post("/webhook-whatsapp", async (req, res) => {
     }
 
     // === ОБРАБОТКА ОПЛАТЫ ===
-    if (lowerMsg.includes("kaspi") || lowerMsg.includes("каспи")) {
+    if ((lowerMsg.includes("kaspi") || lowerMsg.includes("каспи")) && session.cart.length > 0) {
       if (session.cart.length === 0) {
         await sendMessage(from, "🛒 Корзина пуста");
         return res.sendStatus(200);
@@ -405,7 +404,7 @@ app.post("/webhook-whatsapp", async (req, res) => {
       return res.sendStatus(200);
     }
 
-    if (lowerMsg.includes("наличн") || lowerMsg.includes("налич")) {
+    if ((lowerMsg.includes("наличн") || lowerMsg.includes("налич")) && session.cart.length > 0) {
       if (session.cart.length === 0) {
         await sendMessage(from, "🛒 Корзина пуста");
         return res.sendStatus(200);
