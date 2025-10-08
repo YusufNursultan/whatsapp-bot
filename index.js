@@ -130,6 +130,12 @@ app.post("/webhook-whatsapp", async (req, res) => {
     const session = ensureSession(from);
     const lower = msg.toLowerCase();
 
+    // Игнорировать сообщения, отправленные ботом
+if (req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0]?.from === process.env.WHATSAPP_NUMBER) {
+  return res.sendStatus(200);
+}
+
+
     console.log(`📩 ${from}: ${msg}`);
 
     // Очистка корзины
