@@ -246,7 +246,7 @@ app.post("/webhook-whatsapp", async (req, res) => {
 
       if (lowerMsg.includes("kaspi")) {
         session.paymentMethod = "Kaspi";
-        const kaspiLink = "https://pay.kaspi.kz/pay/3ofujmgr";
+        const kaspiLink = "pay.kaspi.kz/pay/3ofujmgr";
 
         await sendMessage(from, receipt);
         await sendMessage(
