@@ -3,7 +3,7 @@ import bodyParser from "body-parser";
 import axios from "axios";
 import OpenAI from "openai";
 import { v4 as uuidv4 } from "uuid";
-import { createKaspiPaymentLink, formatReceipt } from "./kaspi-link.js";
+import { formatReceipt } from "./kaspi-link.js";
 
 const app = express();
 app.use(bodyParser.json());
@@ -15,24 +15,22 @@ const ULTRAMSG_TOKEN = process.env.ULTRAMSG_TOKEN;
 const OPERATOR_PHONE = process.env.OPERATOR_PHONE;
 const deliveryPrice = 700;
 
-// Валидация env переменных
 const requiredEnvVars = [
-  'OPENAI_API_KEY', 
-  'ULTRAMSG_INSTANCE_ID', 
-  'ULTRAMSG_TOKEN', 
-  'OPERATOR_PHONE'
+  "OPENAI_API_KEY",
+  "ULTRAMSG_INSTANCE_ID",
+  "ULTRAMSG_TOKEN",
+  "OPERATOR_PHONE",
 ];
-
-const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
+const missingVars = requiredEnvVars.filter((v) => !process.env[v]);
 if (missingVars.length > 0) {
-  console.error(`❌ Missing required env vars: ${missingVars.join(', ')}`);
+  console.error(`❌ Missing required env vars: ${missingVars.join(", ")}`);
   process.exit(1);
 }
 
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 const sessions = {};
 
-// Полное меню
+// Меню
 const menu = {
   "Doner Classic 30 см": 1790,
   "Doner Classic 40 см": 1990,
@@ -78,148 +76,97 @@ const menu = {
 
 function ensureSession(phone) {
   if (!sessions[phone]) {
-    sessions[phone] = { 
-      cart: [], 
-      conversation: [], 
-      address: "", 
+    sessions[phone] = {
+      cart: [],
+      conversation: [],
+      address: "",
       paymentMethod: "",
       orderId: "",
-      total: 0
+      total: 0,
+      paymentConfirmed: false,
     };
   }
   return sessions[phone];
 }
 
-// Системный промт
-function buildSystemPrompt(phone) {
-  const session = sessions[phone];
-  const cartText = session.cart.length
-    ? session.cart.map((item, idx) => 
-        `${idx + 1}. ${item.name} x${item.quantity} = ${item.price * item.quantity}₸`
-      ).join("\n")
-    : "🛒 *Корзина пуста*";
-
-  const menuText = Object.entries(menu)
-    .map(([name, price]) => `- ${name}: ${price}₸`)
-    .join("\n");
-
-  return `
-Ты — профессиональный оператор кафе Ali Doner Aktau 🍔🌯.  
-Говори **дружелюбно, кратко и профессионально**, без приветствий типа "сәлем" или "привет".  
-Используй язык клиента (қазақша / по-русски / English).
-
-📋 Твои задачи:
-1. Показать меню, если клиент спрашивает.
-2. Добавлять блюда в корзину, уточняя количество.
-3. Запрашивать адрес доставки, если не указан.
-4. Спрашивать способ оплаты: Kaspi, наличными, или другими банками.
-5. Сформировать **профессиональный чек**, с жирным выделением суммы, номера заказа и Kaspi ссылки.
-6. Вести заказ от начала до конца, не теряя клиента.
-7. Не придумывать цены, использовать только из меню.
-8. Не использовать стандартные приветствия.
-9. Все инструкции по оплате должны быть четкими и понятными.
-
-🛒 Текущая корзина:
-${cartText}
-
-📱 Меню:
-${menuText}
-
-💰 Стоимость доставки: ${deliveryPrice}₸
-
-Используй естественный язык и реагируй на слова клиента гибко. Например:
-- "Kaspi", "Оплата через Kaspi", "Оплатить онлайн" → предложить Kaspi ссылку.
-- "Наличка", "Оплата при получении", "Другой банк" → уточнить и сформировать чек.
-
-Будь профессиональным и внимательным: помоги клиенту довести заказ до оплаты полностью.
-`;
-}
-
-
-// Отправка сообщений
-async function sendMessage(to, text) {
-  try {
-    let cleanTo = to.replace("@c.us", "");
-    if (cleanTo.length === 10) {
-      cleanTo = `7${cleanTo}`;
-    } else if (cleanTo.length === 11 && cleanTo.startsWith('8')) {
-      cleanTo = `7${cleanTo.slice(1)}`;
-    }
-    
-    const payload = new URLSearchParams({
-      token: ULTRAMSG_TOKEN,
-      to: cleanTo,
-      body: text
-    }).toString();
-    
-    const response = await axios.post(
-      `https://api.ultramsg.com/${ULTRAMSG_INSTANCE_ID}/messages/chat`,
-      payload,
-      { 
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        timeout: 10000
-      }
-    );
-    
-    console.log(`✅ Message sent to ${cleanTo}`);
-    return response.data;
-  } catch (err) {
-    console.error("❌ sendMessage error:", err.response?.data || err.message);
-    throw err;
-  }
-}
-
-// AI ответ
+// ==== AI ====
 async function getAIResponse(msg, phone) {
   const session = ensureSession(phone);
-  
   session.conversation.push({ role: "user", content: msg });
-  if (session.conversation.length > 20) {
+  if (session.conversation.length > 20)
     session.conversation = session.conversation.slice(-10);
-  }
-  
-  const systemPrompt = buildSystemPrompt(phone);
-  const recentMessages = session.conversation.slice(-6);
-  
+
+  const cartText = session.cart.length
+    ? session.cart
+        .map(
+          (item, i) =>
+            `${i + 1}. ${item.name} x${item.quantity} = ${
+              item.price * item.quantity
+            }₸`
+        )
+        .join("\n")
+    : "Корзина пуста.";
+
+  const systemPrompt = `
+Ты — профессиональный оператор кафе Ali Doner Aktau 🌯🍔. 
+Говори вежливо, без приветствий.  
+Действуй строго по шагам:
+1. Добавь товары из меню, если клиент пишет название блюда.
+2. Когда корзина готова — спроси адрес доставки.
+3. После адреса спроси способ оплаты: Kaspi, наличными или другим банком.
+4. Если Kaspi — выдай *только ссылку Kaspi*, без суммы.  
+5. Если наличными — просто пришли чек.  
+6. Если клиент пишет "Оплатил", подтверди оплату.
+
+📋 Меню:
+${Object.entries(menu)
+  .map(([n, p]) => `- ${n}: ${p}₸`)
+  .join("\n")}
+`;
+
   try {
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
-      messages: [
-        { role: "system", content: systemPrompt }, 
-        ...recentMessages
-      ],
+      messages: [{ role: "system", content: systemPrompt }, ...session.conversation],
       temperature: 0.7,
-      max_tokens: 500,
+      max_tokens: 400,
     });
-    
+
     const reply = completion.choices[0].message.content.trim();
     session.conversation.push({ role: "assistant", content: reply });
     return reply;
   } catch (err) {
-    console.error("❌ OpenAI error:", err.response?.data || err.message);
-    return "Извините, произошла ошибка. Пожалуйста, попробуйте еще раз.";
+    console.error("❌ OpenAI error:", err.message);
+    return "Извините, произошла ошибка. Попробуйте ещё раз.";
   }
 }
 
-// Обработка команды очистки корзины
-function handleClearCart(phone) {
-  const session = ensureSession(phone);
-  session.cart = [];
-  return "🛒 Корзина очищена. Что бы вы хотели заказать?";
+// ==== Отправка сообщений ====
+async function sendMessage(to, text) {
+  try {
+    let cleanTo = to.replace("@c.us", "");
+    if (cleanTo.length === 10) cleanTo = `7${cleanTo}`;
+    if (cleanTo.length === 11 && cleanTo.startsWith("8"))
+      cleanTo = `7${cleanTo.slice(1)}`;
+
+    const payload = new URLSearchParams({
+      token: ULTRAMSG_TOKEN,
+      to: cleanTo,
+      body: text,
+    }).toString();
+
+    await axios.post(
+      `https://api.ultramsg.com/${ULTRAMSG_INSTANCE_ID}/messages/chat`,
+      payload,
+      { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
+    );
+    console.log(`✅ Sent to ${cleanTo}`);
+  } catch (err) {
+    console.error("❌ sendMessage error:", err.response?.data || err.message);
+  }
 }
 
-// В начале файла остаются все импорты и конфиги без изменений
-
-// ====== Новая функция проверки оплаты Kaspi ======
-// Пока пример через имитацию API (заменить на реальный Kaspi webhook или API)
-async function checkKaspiPayment(orderId) {
-  // TODO: заменить на реальный запрос к Kaspi API
-  // Пример ответа:
-  // { status: "SUCCESS" | "PENDING" | "FAILED" }
-  return "SUCCESS"; // для теста считаем, что оплата прошла
-}
-
-// ====== Webhook WhatsApp ======
+// ==== Webhook ====
 app.post("/webhook-whatsapp", async (req, res) => {
   try {
     const data = req.body?.data;
@@ -227,127 +174,142 @@ app.post("/webhook-whatsapp", async (req, res) => {
 
     const msg = data.body?.trim();
     const from = data.from;
-
-    if (data.fromMe || !msg) return res.sendStatus(200);
+    if (!msg || data.fromMe) return res.sendStatus(200);
 
     const session = ensureSession(from);
     const lowerMsg = msg.toLowerCase();
 
-    // Очистка корзины
-    if (lowerMsg.includes("очистить корзину") || lowerMsg === "очистить") {
-      const reply = handleClearCart(from);
-      await sendMessage(from, reply);
+    // Очистить корзину
+    if (lowerMsg.includes("очистить")) {
+      session.cart = [];
+      await sendMessage(from, "🧺 Корзина очищена. Можете начать заново.");
       return res.sendStatus(200);
     }
 
-    // Оплата
-    if (lowerMsg.includes("оплат") || lowerMsg.includes("kaspi") ||
-        lowerMsg.includes("наличн") || lowerMsg.includes("банк")) {
+    // Подтверждение оплаты
+    if (lowerMsg.includes("оплатил") || lowerMsg.includes("оплатилa")) {
+      if (!session.orderId) {
+        await sendMessage(from, "Не найден активный заказ для подтверждения оплаты.");
+        return res.sendStatus(200);
+      }
 
-      session.paymentMethod = lowerMsg.includes("kaspi") ? "Kaspi" : "Наличные";
+      session.paymentConfirmed = true;
+      await sendMessage(
+        from,
+        `✅ *Оплата подтверждена!*  
+Спасибо! Ваш заказ #${session.orderId} принят в работу.  
+⏰ Доставка 25–35 минут.`
+      );
+      await sendMessage(
+        OPERATOR_PHONE,
+        `💰 *ПОДТВЕРЖДЕНА ОПЛАТА*  
+Заказ #${session.orderId}\nАдрес: ${session.address}`
+      );
+      return res.sendStatus(200);
+    }
 
-      const cartTotal = session.cart.reduce((sum, i) => sum + i.price * i.quantity, 0);
-      const total = Math.round(cartTotal + deliveryPrice);
+    // Обработка выбора оплаты
+    if (
+      lowerMsg.includes("kaspi") ||
+      lowerMsg.includes("оплат") ||
+      lowerMsg.includes("налич") ||
+      lowerMsg.includes("банк")
+    ) {
+      const cartTotal = session.cart.reduce(
+        (s, i) => s + i.price * i.quantity,
+        0
+      );
 
       if (cartTotal === 0) {
-        await sendMessage(from, "🛒 *Ваша корзина пуста*. Добавьте товары перед оформлением заказа.");
+        await sendMessage(
+          from,
+          "🛒 *Корзина пуста.* Добавьте товары перед оформлением."
+        );
         return res.sendStatus(200);
       }
 
       if (!session.address) {
-        await sendMessage(from, "📝 Пожалуйста, укажите адрес доставки:");
+        await sendMessage(from, "📍 Пожалуйста, укажите адрес доставки:");
         return res.sendStatus(200);
       }
 
       const orderId = uuidv4().slice(0, 8);
       session.orderId = orderId;
-      session.total = total;
+      session.total = cartTotal + deliveryPrice;
 
-      let receipt = formatReceipt(session.cart, session.address, cartTotal, deliveryPrice);
+      const receipt = formatReceipt(
+        session.cart,
+        session.address,
+        cartTotal,
+        deliveryPrice
+      );
 
-      if (session.paymentMethod === "Kaspi") {
-        const paymentLink = createKaspiPaymentLink(total);
+      if (lowerMsg.includes("kaspi")) {
+        session.paymentMethod = "Kaspi";
+        const kaspiLink = "https://pay.kaspi.kz/pay/3ofujmgr";
 
         await sendMessage(from, receipt);
+        await sendMessage(
+          from,
+          `
+💳 *Kaspi Оплата*  
+🔗 Ссылка: ${kaspiLink}
 
-        const paymentMessage = `
-💳 *ОПЛАТА KASPI*
-
-💰 Сумма: *${total}₸*
-🔗 Ссылка для оплаты: *${paymentLink}*
-
-*Инструкция:*
-1. Нажмите на ссылку выше
-2. Подтвердите оплату в Kaspi приложении
-3. Ожидайте доставку 25-35 минут
+Пожалуйста, оплатите *точную сумму из чека*  
+и напишите "Оплатил" после перевода.  
 
 📞 *Номер заказа:* #${orderId}
-`;
-        await sendMessage(from, paymentMessage);
+`
+        );
 
-        // Проверка оплаты (имитация)
-        const paymentStatus = await checkKaspiPayment(orderId);
-        if (paymentStatus === "SUCCESS") {
-          const paidReceipt = `✅ *Оплата получена!*  
-🧾 Заказ:
-${session.cart.map(i => `${i.name} x${i.quantity}`).join("\n")}
-🚚 Доставка: ${deliveryPrice}₸
-💳 Итого: *${total}₸*
-🏠 Адрес: ${session.address}`;
-
-          await sendMessage(from, paidReceipt);
-          await sendMessage(OPERATOR_PHONE, `📦 *НОВЫЙ ОПЛАЧЕННЫЙ ЗАКАЗ #${orderId}*\n${paidReceipt}`);
-        }
-
-      } else { // Наличные
-        receipt += `\n\n💵 *Оплата наличными при получении*`;
-        receipt += `\n📞 *Номер заказа:* #${orderId}`;
-        receipt += `\n⏰ *Время приготовления:* 25-35 минут`;
-        await sendMessage(from, receipt);
+        await sendMessage(
+          OPERATOR_PHONE,
+          `📦 *НОВЫЙ ЗАКАЗ #${orderId}*  
+Оплата: Kaspi  
+${receipt}`
+        );
+        return res.sendStatus(200);
       }
 
-      const operatorMessage = `📦 *НОВЫЙ ЗАКАЗ #${orderId}*\nОт: ${from}\n${receipt}\nОплата: ${session.paymentMethod}`;
-      await sendMessage(OPERATOR_PHONE, operatorMessage);
+      // --- Наличка / другие банки ---
+      session.paymentMethod = lowerMsg.includes("банк")
+        ? "Другой банк"
+        : "Наличные";
 
-      session.cart = [];
+      await sendMessage(
+        from,
+        `${receipt}\n\n💵 *Оплата: ${session.paymentMethod}*\n📞 *Номер заказа:* #${orderId}\n⏰ Ожидайте доставку 25–35 минут.`
+      );
+
+      await sendMessage(
+        OPERATOR_PHONE,
+        `📦 *НОВЫЙ ЗАКАЗ #${orderId}*  
+Оплата: ${session.paymentMethod}\n${receipt}`
+      );
       return res.sendStatus(200);
     }
 
-    // Обработка адреса
-    if (lowerMsg.includes("адрес") || session.conversation.some(m => 
-        m.content.includes("адрес") && m.role === "assistant")) {
+    // Сохраняем адрес
+    if (lowerMsg.includes("ул") || lowerMsg.includes("дом") || lowerMsg.includes("адрес")) {
       session.address = msg;
+      await sendMessage(from, `📍 Адрес доставки сохранён: ${msg}`);
+      return res.sendStatus(200);
     }
 
     // AI ответ
     const reply = await getAIResponse(msg, from);
     await sendMessage(from, reply);
-
     res.sendStatus(200);
   } catch (error) {
     console.error("❌ Webhook error:", error);
-    res.status(500).send("Internal Server Error");
+    res.status(500).send("Internal Error");
   }
 });
 
-
-app.get("/status", (req, res) => {
-  res.json({ 
-    status: "ok", 
-    sessions: Object.keys(sessions).length,
-    timestamp: new Date().toISOString()
-  });
-});
-
-app.get("/sessions", (req, res) => {
-  if (process.env.NODE_ENV === "production") {
-    return res.status(403).json({ error: "Not available in production" });
-  }
-  res.json(sessions);
-});
+app.get("/status", (req, res) =>
+  res.json({ status: "ok", sessions: Object.keys(sessions).length })
+);
 
 app.listen(PORT, () => {
   console.log(`✅ WhatsApp Bot running on port ${PORT}`);
-  console.log(`📞 Operator phone: ${OPERATOR_PHONE}`);
-  console.log(`🛍️  Menu items: ${Object.keys(menu).length}`);
 });
