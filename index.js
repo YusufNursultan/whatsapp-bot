@@ -167,7 +167,12 @@ app.post("/webhook", async (req, res) => {
     console.log("🧠 Текущий контекст диалога:");
     console.log(JSON.stringify(sessions[from], null, 2));
 
-// Запрос к OpenAI
+// 🧠 Убедимся, что system-промт есть
+if (!sessions[from].some(msg => msg.role === "system")) {
+  sessions[from].unshift({ role: "system", content: SYSTEM_PROMPT });
+}
+
+// 🚀 Запрос к OpenAI
 console.log("🚀 Отправляем запрос к OpenAI...");
 const completion = await axios.post(
   "https://api.openai.com/v1/chat/completions",
@@ -179,6 +184,7 @@ const completion = await axios.post(
     headers: { Authorization: `Bearer ${OPENAI_API_KEY}` },
   }
 );
+
 
 // 🧠 Исправлено: правильный доступ к ответу
 const reply = completion.data.choices?.[0]?.message?.content || "Извините, произошла ошибка.";
