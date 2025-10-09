@@ -10,7 +10,7 @@ const PORT = process.env.PORT || 3000;
 const ULTRAMSG_INSTANCE_ID = process.env.ULTRAMSG_INSTANCE_ID;
 const ULTRAMSG_TOKEN = process.env.ULTRAMSG_TOKEN;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const OPERATOR_NUMBER = process.env.OPERATOR_NUMBER; // номер для уведомлений
+const OPERATOR_NUMBER = process.env.OPERATOR_NUMBER;
 
 // 🧠 Контексты пользователей
 const sessions = {};
@@ -61,21 +61,27 @@ const menu = {
 
 // 💬 Системный промт
 const SYSTEM_PROMPT = `
-Ты — вежливый ассистент WhatsApp для фастфуда *Ali Doner Ақтау*.
-1. Приветствуй на двух языках (каз/рус).
-2. Принимай заказ, адрес и способ оплаты.
-3. Если всё получено — отправь чек и скажи, что доставка примерно 40 мин.
-4. Никогда не отвечай на свои собственные сообщения.
-5. Пиши кратко, дружелюбно, с уважением.
+Ты — ассистент WhatsApp для фастфуда *Ali Doner Ақтау*.
+1. Приветствуй клиентов на казахском и русском.
+2. Принимай заказ, адрес, контакт.
+3. Отправь чек с итогом и временем доставки (40 мин).
+4. Не обсуждай оплату и не отвечай на свои сообщения.
+5. Пиши коротко и дружелюбно.
 `;
 
-// 📩 Функция отправки сообщений через UltraMsg
+// 📩 Отправка сообщений через UltraMsg
 async function sendMessage(to, text) {
-  await axios.post(`https://api.ultramsg.com/${ULTRAMSG_INSTANCE_ID}/messages/chat`, {
-    token: ULTRAMSG_TOKEN,
-    to,
-    body: text,
-  });
+  console.log(`📤 Отправка сообщения клиенту ${to}:`);
+  console.log(text);
+  try {
+    await axios.post(`https://api.ultramsg.com/${ULTRAMSG_INSTANCE_ID}/messages/chat`, {
+      token: ULTRAMSG_TOKEN,
+      to,
+      body: text,
+    });
+  } catch (error) {
+    console.error("❌ Ошибка при отправке:", error.response?.data || error.message);
+  }
 }
 
 // 🧾 Формирование чека
@@ -93,35 +99,45 @@ ${list}
 `;
 }
 
-// 🚀 Вебхук от UltraMsg
+// 🚀 Вебхук UltraMsg
 app.post("/webhook", async (req, res) => {
   try {
-    const data = req.body;
+    console.log("🟢 Получен запрос от UltraMsg:");
+    console.log(JSON.stringify(req.body, null, 2));
 
+    const data = req.body;
     if (!data || !data.data || !data.data.from || !data.data.body) {
+      console.log("⚠️ Нет данных сообщения.");
       return res.sendStatus(200);
     }
 
-    const from = data.data.from; // номер клиента
+    const from = data.data.from;
     const text = data.data.body.trim();
-    const isFromMe = data.data.fromMe; // ⚠️ если сообщение от бота — игнорим
+    const isFromMe = data.data.fromMe;
 
-    if (isFromMe) return res.sendStatus(200);
+    if (isFromMe) {
+      console.log("⛔ Игнорируем своё сообщение (бот отправил сам себе).");
+      return res.sendStatus(200);
+    }
 
-    console.log(`📩 Получено сообщение от ${from}: ${text}`);
+    console.log(`📩 Сообщение от ${from}: ${text}`);
 
-    // 🧠 Инициализация сессии
+    // 🧠 Контекст
     if (!sessions[from]) {
       sessions[from] = [
         { role: "system", content: SYSTEM_PROMPT },
         { role: "assistant", content: "Сәлеметсіз бе!\nЗдравствуйте!\nAli Doner Ақтау\nТапсырысыңыз, мекен-жай, байланыс нөміріңізді жазыңыз:\nНапишите ваш заказ, адрес доставки, контактный номер:" }
       ];
+      console.log(`🆕 Новая сессия создана для ${from}`);
     }
 
-    // Добавляем сообщение пользователя
     sessions[from].push({ role: "user", content: text });
 
-    // 🧠 Запрос к OpenAI
+    console.log("🧠 Текущий контекст диалога:");
+    console.log(JSON.stringify(sessions[from], null, 2));
+
+    // Запрос к OpenAI
+    console.log("🚀 Отправляем запрос к OpenAI...");
     const completion = await axios.post("https://api.openai.com/v1/chat/completions", {
       model: "gpt-4o-mini",
       messages: sessions[from],
@@ -130,23 +146,23 @@ app.post("/webhook", async (req, res) => {
     });
 
     const reply = completion.data.choices[0].message.content;
+    console.log("🤖 Ответ от OpenAI:");
+    console.log(reply);
 
-    // Добавляем ответ в контекст
     sessions[from].push({ role: "assistant", content: reply });
 
-    // ✉️ Отправляем ответ пользователю
     await sendMessage(from, reply);
 
     res.sendStatus(200);
   } catch (err) {
-    console.error("Ошибка:", err.message);
+    console.error("❌ Ошибка в обработке запроса:", err.message);
     res.sendStatus(500);
   }
 });
 
-// 🌐 Проверка
+// 🌐 Проверка работы
 app.get("/", (req, res) => {
-  res.send("🤖 Ali Doner бот работает!");
+  res.send("🤖 Ali Doner бот работает и пишет в консоль!");
 });
 
 app.listen(PORT, () => console.log(`✅ Сервер запущен на порту ${PORT}`));
