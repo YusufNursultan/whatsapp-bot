@@ -136,26 +136,33 @@ app.post("/webhook", async (req, res) => {
     console.log("🧠 Текущий контекст диалога:");
     console.log(JSON.stringify(sessions[from], null, 2));
 
-    // Запрос к OpenAI
-    console.log("🚀 Отправляем запрос к OpenAI...");
-    const completion = await axios.post("https://api.openai.com/v1/chat/completions", {
-      model: "gpt-4o-mini",
-      messages: sessions[from],
-    }, {
-      headers: { Authorization: `Bearer ${OPENAI_API_KEY}` },
-    });
+// Запрос к OpenAI
+console.log("🚀 Отправляем запрос к OpenAI...");
+const completion = await axios.post(
+  "https://api.openai.com/v1/chat/completions",
+  {
+    model: "gpt-4o-mini",
+    messages: sessions[from],
+  },
+  {
+    headers: { Authorization: `Bearer ${OPENAI_API_KEY}` },
+  }
+);
 
-    const reply = completion.data.choices[0].message.content;
-    console.log("🤖 Ответ от OpenAI:");
-    console.log(reply);
-    
-    console.log(res.data.choices[0].message);
+// 🧠 Исправлено: правильный доступ к ответу
+const reply = completion.data.choices?.[0]?.message?.content || "Извините, произошла ошибка.";
 
-    sessions[from].push({ role: "assistant", content: reply });
+console.log("🤖 Ответ от OpenAI:");
+console.log(reply);
 
-    await sendMessage(from, reply);
+// Убираем неверный console.log(res.data...)
+sessions[from].push({ role: "assistant", content: reply });
 
-    res.sendStatus(200);
+// Отправляем сообщение клиенту
+await sendMessage(from, reply);
+
+res.sendStatus(200);
+
   } catch (err) {
     console.error("❌ Ошибка в обработке запроса:", err.message);
     res.sendStatus(500);
