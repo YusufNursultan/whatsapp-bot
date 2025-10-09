@@ -148,6 +148,8 @@ app.post("/webhook", async (req, res) => {
     const reply = completion.data.choices[0].message.content;
     console.log("🤖 Ответ от OpenAI:");
     console.log(reply);
+    
+    console.log(res.data.choices[0].message);
 
     sessions[from].push({ role: "assistant", content: reply });
 
