@@ -215,11 +215,21 @@ sessions[from].push({ role: "assistant", content: reply });
 // Отправляем сообщение клиенту
 await sendMessage(from, reply);
 
-// --- вставь ниже этот блок ---
+// --- отправка оператору, если заказ подтверждён ---
 if (reply.includes("Тапсырысыңыз қабылданды") || reply.includes("Ваш заказ принят")) {
-  await sendMessage(OPERATOR_NUMBER, `📋 Новый заказ от клиента ${from}:\n${reply}`);
-  console.log(`📨 Чек отправлен оператору: ${OPERATOR_NUMBER}`);
+  // Найдём последний сформированный чек из памяти
+  const receiptText = conversationHistory[from]?.find(
+    msg => msg.role === "assistant" && msg.content.includes("Ваш заказ:")
+  )?.content;
+
+  if (OPERATOR_NUMBER && receiptText) {
+    await sendMessage(OPERATOR_NUMBER, `📋 Новый заказ от клиента ${from}:\n${receiptText}`);
+    console.log(`📨 Чек отправлен оператору: ${OPERATOR_NUMBER}`);
+  } else {
+    console.log("⚠️ Не найден чек или не указан OPERATOR_NUMBER");
+  }
 }
+
 
 res.sendStatus(200);
 
