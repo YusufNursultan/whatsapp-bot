@@ -144,6 +144,7 @@ ${list}
 💰 *Итого:* ${total + 700}₸  
 📍 Адрес: ${address}  
 ⏰ Примерно 40 минут
+https://pay.kaspi.kz/pay/3ofujmgr
 `;
 }
 
@@ -214,26 +215,6 @@ sessions[from].push({ role: "assistant", content: reply });
 
 // Отправляем сообщение клиенту
 await sendMessage(from, reply);
-
-// Когда бот формирует чек
-if (reply.includes("Ваш заказ:") || reply.includes("Тапсырысыңыз:")) {
-  lastReceipts[from] = reply; // сохраняем чек в памяти
-}
-
-// --- если заказ подтверждён ---
-if (reply.includes("Ваш заказ принят") || reply.includes("Тапсырысыңыз қабылданды")) {
-  const receiptText = lastReceipts[from]; // достаём последний чек из памяти
-
-  if (OPERATOR_NUMBER && receiptText) {
-    const now = new Date().toLocaleString("kk-KZ", { timeZone: "Asia/Aqtau" });
-    await sendMessage(OPERATOR_NUMBER, `📅 ${now}\n📋 Новый заказ от клиента ${from}:\n${receiptText}`);
-    console.log(`📨 Чек отправлен оператору: ${OPERATOR_NUMBER}`);
-  } else {
-    console.log("⚠️ Не найден чек или не указан OPERATOR_NUMBER");
-  }
-}
-
-
 
 res.sendStatus(200);
 
