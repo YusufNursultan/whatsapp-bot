@@ -148,6 +148,20 @@ https://pay.kaspi.kz/pay/3ofujmgr
 `;
 }
 
+async function sendPaymentButton(to, amount) {
+  const paymentUrl = `https://pay.kaspi.kz/pay/3ofujmgr`; // 👉 вставь свою реальную ссылку Kaspi
+
+  const data = {
+    token: ULTRAMSG_TOKEN,
+    to,
+    body: `💳 Төлеу үшін Kaspi сілтемесін басыңыз:\nСома: ${amount} ₸\n${paymentUrl}`
+  };
+
+  await axios.post(`https://api.ultramsg.com/${ULTRAMSG_INSTANCE_ID}/messages/chat`, data);
+  console.log(`💰 Кнопка Kaspi отправлена клиенту: ${to}`);
+}
+
+
 // 🚀 Вебхук UltraMsg
 app.post("/webhook", async (req, res) => {
   try {
@@ -215,6 +229,24 @@ sessions[from].push({ role: "assistant", content: reply });
 
 // Отправляем сообщение клиенту
 await sendMessage(from, reply);
+
+// 💳 Логика оплаты и уведомления оператора
+if (/растаймын/i.test(text) || /подтверждаю/i.test(text)) {
+  // когда клиент подтверждает заказ
+  const match = reply.match(/(\d+)\s*₸/); // ищем сумму в ответе
+  const total = match ? parseInt(match[1]) : 0;
+
+  await sendMessage(from, `💰 Жалпы сома: ${total}₸\nТөмендегі батырманы басып төлеңіз 👇`);
+  await sendPaymentButton(from, total);
+  console.log(`💳 Отправлена кнопка оплаты клиенту ${from}`);
+}
+
+// если клиент написал "оплатил" или "төледім"
+if (/төледім/i.test(text) || /оплатил/i.test(text)) {
+  await sendMessage(from, "✅ Төлем сәтті қабылданды! Тапсырысыңыз қабылданды ❤️");
+  await sendMessage(OPERATOR_NUMBER, `📋 Оплаченный заказ от ${from}:\n${reply}`);
+  console.log(`📨 Оплаченный заказ отправлен оператору: ${OPERATOR_NUMBER}`);
+}
 
 res.sendStatus(200);
 
