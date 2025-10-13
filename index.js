@@ -12,8 +12,13 @@ const ULTRAMSG_TOKEN = process.env.ULTRAMSG_TOKEN;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPERATOR_NUMBER = process.env.OPERATOR_NUMBER;
 
-// 🧠 Контексты пользователей
+// 🧠 Храним состояние пользователей
 const sessions = {};
+const userStages = {};
+const userOrders = {};
+const userAddresses = {};
+const userPhones = {};
+const userTotals = {};
 
 // 🍔 Меню
 const menu = {
@@ -59,251 +64,169 @@ const menu = {
   "Fuse Tea 1L": 890,
 };
 
-const SYSTEM_PROMPT = `
-Ты — умный ассистент фастфуда "Ali Doner Ақтау".
-Ты общаешься на двух языках: қазақша 🇰🇿 және орысша 🇷🇺.
-Определи язык клиента по первому сообщению и придерживайся его до конца диалога.
-
-📋 Меню (только это, без выдумок):
-${Object.entries(menu)
-  .map(([name, price]) => `- ${name}: ${price}₸`)
-  .join("\n")}
-
-🎯 Твоя цель — принять заказ точно, вежливо и структурированно.
-
-🧠 Алгоритм общения:
-1. Если клиент приветствует — отвечай на том языке на каком языке написал клиент в формате:
-  - Қазақша: "Сәлеметсізбе?! Бұл - Ali Doner Ақтау операторы. Қандай көмек көрсете аламын?" 
-  - Русский: "Здравствуйте?! Это оператор - Ali Doner Ақтау. Как я могу вам помочь?"
-2. Если клиент пишет блюдо (даже с ошибкой, например "донэр", "бургерр") — найди ближайшее совпадение из меню.
-3. После выбора блюда спроси количество (например: "Қанша дана?" / "Сколько штук?").
-4. После того как клиент закончил выбирать блюда — спроси адрес доставки в формате:
-   — Қазақша: "Жеткізу мекенжайын жазыңыз (мысалы: 12мкр 47үй 72пәтер )"
-   — Русский: "Введите адрес в формате: улица, дом, квартира (например: 12мкр 47дом 72кв )"
-   Адрес должен содержать хотя бы одно число и слова вроде "үй", "дом", "мкр", "кв", "пәтер". Зона доставки с 1 по 40 микрорайоны, Толкын-1,2, и шыгыс 1,2,3. 
-   Если формат не понятный — переспроси.
-5. После получения корректного адреса спроси номер телефона:
-   — Қазақша: "Телефон нөміріңізді жазыңыз (мысалы: 87771234567)"
-   — Русский: "Напишите номер телефона (например: 87771234567)" 
-   Если телефон номер не состоит из 11 цифр или 11 цифр то переспроси.
-   
-6. После того как адрес и телефон получены — сформируй чек:
-   ---
-   ✅ Тапсырысыңыз / Ваш заказ:
-   - Донер (тауық еті) ×2 — 2400₸  
-   - Картошка фри ×1 — 400₸  
-   Жалпы / Итого: 2800₸  
-   Мекенжай / Адрес: 12мкр 47үй 72пәтер  
-   Телефон: 87771234567 
-   Болжаған жеткізу уақыты / Примерное время доставки: 35 минут  
-   ---
-   и спрашивай спопсобы оплаты:
-   На казахском: 
-   💰 Төлем түрін таңдаңыз:
-1️⃣ Kaspi
-2️⃣ Наличные
-3️⃣ Halyk
-   На русском: 
-   💰 Выберите способ оплаты:
-1️⃣ Kaspi
-2️⃣ Наличные
-3️⃣ Halyk
-7. Если клиент выберет Каспи или Халык бот отправляет ссылку на оплату.
-8. Если наличные сразу уходить оператору.
-
-9. После подтверждения напиши:
-   "Тапсырысыңыз қабылданды! Рақмет ❤️" / "Ваш заказ принят! Спасибо ❤️"
-   и больше ничего не спрашивай.
-10. Если клиент пишет новое сообщение после завершения — начинай новый заказ.
-11. Если клиент делает ошибку (например “донер классикк”) — не ругай, а уточни: “Сіз ‘Донер’ айтқыңыз келді ме?” / “Вы имели в виду ‘Донер’?”
-12. Никогда не очищай корзину без подтверждения.
-13. Не меняй язык без причины.
-14. Будь кратким, дружелюбным и естественным.
-
-❗ Важно:
-— Не придумывай блюда.  
-— Не показывай меню больше одного раза, если клиент уже его видел.  
-— Не спрашивай адрес и телефон одновременно.  
-— Не начинай чек, пока не получил всё (адрес + телефон).  
-— Не добавляй ничего, чего нет в меню.
-`;
-
-
-
-// 📩 Отправка сообщений через UltraMsg
-async function sendMessage(to, text) {
-  console.log(`📤 Отправка сообщения клиенту ${to}:`);
-  console.log(text);
+// 📩 Отправка сообщений
+async function sendMessage(to, body) {
   try {
     await axios.post(`https://api.ultramsg.com/${ULTRAMSG_INSTANCE_ID}/messages/chat`, {
       token: ULTRAMSG_TOKEN,
       to,
-      body: text,
+      body,
     });
-  } catch (error) {
-    console.error("❌ Ошибка при отправке:", error.response?.data || error.message);
+  } catch (e) {
+    console.error("Ошибка отправки:", e.response?.data || e.message);
   }
 }
 
-// 🧾 Формирование чека
-function formatReceipt(order, address) {
-  let total = order.reduce((sum, i) => sum + (menu[i.name] || 0) * i.qty, 0);
-  let list = order.map((i) => `• ${i.name} x${i.qty} — ${menu[i.name]}₸`).join("\n");
-  return `
-🧾 *Чек Ali Doner Ақтау*  
-${list}
-
-🚚 Доставка: 700₸  
-💰 *Итого:* ${total + 700}₸  
-📍 Адрес: ${address}  
-⏰ Примерно 40 минут
-`;
-}
-
-async function sendPaymentButton(to, amount, type) {
-  const urls = {
-    Kaspi: "https://pay.kaspi.kz/pay/3ofujmgr", // 🔁 вставь свой ID
-    Halyk: "https://halykbank.kz/pay/your_shop_id"
-  };
-
-  const paymentUrl = urls[type];
-
-  await axios.post(`https://api.ultramsg.com/${ULTRAMSG_INSTANCE_ID}/messages/chat`, {
-    token: ULTRAMSG_TOKEN,
-    to,
-    body: `💳 ${type} арқылы ${amount}₸ төлеу үшін сілтемені басыңыз:\n${paymentUrl}`
-  });
-}
-
-
-
-// 🚀 Вебхук UltraMsg
-app.post("/webhook", async (req, res) => {
-  try {
-    console.log("🟢 Получен запрос от UltraMsg:");
-    console.log(JSON.stringify(req.body, null, 2));
-
-    const data = req.body;
-    if (!data || !data.data || !data.data.from || !data.data.body) {
-      console.log("⚠️ Нет данных сообщения.");
-      return res.sendStatus(200);
-    }
-
-    const from = data.data.from;
-    const text = data.data.body.trim();
-    const isFromMe = data.data.fromMe;
-
-    if (isFromMe) {
-      console.log("⛔ Игнорируем своё сообщение (бот отправил сам себе).");
-      return res.sendStatus(200);
-    }
-
-    console.log(`📩 Сообщение от ${from}: ${text}`);
-
-    // 🧠 Контекст
-    if (!sessions[from]) {
-      sessions[from] = [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "assistant", content: "Сәлеметсіз бе!\nЗдравствуйте!\nAli Doner Ақтау\nТапсырысыңыз, мекен-жай, байланыс нөміріңізді жазыңыз:\nНапишите ваш заказ, адрес доставки, контактный номер:" }
-      ];
-      console.log(`🆕 Новая сессия создана для ${from}`);
-    }
-
-    sessions[from].push({ role: "user", content: text });
-
-    console.log("🧠 Текущий контекст диалога:");
-    console.log(JSON.stringify(sessions[from], null, 2));
-
-// 🧠 Убедимся, что system-промт есть
-if (!sessions[from].some(msg => msg.role === "system")) {
-  sessions[from].unshift({ role: "system", content: SYSTEM_PROMPT });
-}
-
-// 🚀 Запрос к OpenAI
-console.log("🚀 Отправляем запрос к OpenAI...");
-const completion = await axios.post(
-  "https://api.openai.com/v1/chat/completions",
-  {
-    model: "gpt-4o-mini",
-    messages: sessions[from],
-  },
-  {
-    headers: { Authorization: `Bearer ${OPENAI_API_KEY}` },
-  }
-);
-
-
-// 🧠 Исправлено: правильный доступ к ответу
-const reply = completion.data.choices?.[0]?.message?.content || "Извините, произошла ошибка.";
-
-console.log("🤖 Ответ от OpenAI:");
-console.log(reply);
-
-// Убираем неверный console.log(res.data...)
-sessions[from].push({ role: "assistant", content: reply });
-
-// Отправляем сообщение клиенту
-await sendMessage(from, reply);
-// --- После получения адреса от клиента ---
-if (userStage === "address_collected") {
-  const total = order.reduce((sum, i) => sum + (menu[i.name] || 0) * i.qty, 0);
-
-  const receipt = `
-✅ Тапсырысыңыз:
-${order.map(i => `- ${i.name} ×${i.qty} — ${(menu[i.name] || 0) * i.qty}₸`).join("\n")}
-Жалпы: ${total}₸
-Мекенжай: ${address}
-Телефон: ${phone}
-
+// 💳 Кнопки оплаты
+async function sendPaymentButtons(to, total) {
+  const message = `
 💰 Төлем түрін таңдаңыз:
-1️⃣ Kaspi
+1️⃣ Kaspi (${total}₸)
 2️⃣ Наличные
 3️⃣ Halyk
 `;
-
-  sessions[from].push({
-    role: "assistant",
-    content: receipt
-  });
-
-  await sendMessage(from, receipt);
-  userStage = "waiting_payment_method";
+  await sendMessage(to, message);
 }
-// --- Обработка выбора способа оплаты ---
-if (userStage === "waiting_payment_method") {
-  if (/kaspi/i.test(text)) {
-    await sendMessage(from, "Kaspi арқылы төлеу үшін төмендегі сілтемені басыңыз 👇");
-    await sendPaymentButton(from, total, "Kaspi");
-    userStage = "waiting_payment_confirmation";
 
-  } else if (/halyk/i.test(text)) {
-    await sendMessage(from, "Halyk арқылы төлеу үшін төмендегі сілтемені басыңыз 👇");
-    await sendPaymentButton(from, total, "Halyk");
-    userStage = "waiting_payment_confirmation";
+// 💳 Ссылки оплаты
+const PAYMENT_LINKS = {
+  Kaspi: "https://pay.kaspi.kz/pay/3ofujmgr",
+  Halyk: "https://halykbank.kz/pay/your_shop_id",
+};
 
-  } else if (/нал/i.test(text) || /қолма/i.test(text)) {
-    const confirmMsg = "✅ Наличныемен төлем қабылданды. Тапсырысыңыз өңдеуде ❤️";
-    await sendMessage(from, confirmMsg);
-    await sendMessage(OPERATOR_NUMBER, `📋 Новый заказ (наличные):\n${receipt}`);
-    console.log(`📨 Чек отправлен оператору: ${OPERATOR_NUMBER}`);
-    userStage = "done";
-  } else {
+// 🚀 Основной вебхук
+app.post("/webhook", async (req, res) => {
+  const data = req.body?.data;
+  if (!data || !data.from || !data.body) return res.sendStatus(200);
+
+  const from = data.from;
+  const text = data.body.trim();
+  const isFromMe = data.fromMe;
+
+  if (isFromMe) return res.sendStatus(200);
+
+  console.log(`📩 ${from}: ${text}`);
+
+  // Инициализация
+  if (!userStages[from]) userStages[from] = "start";
+
+  // === ЭТАПЫ ===
+
+  // 1️⃣ Начало
+  if (userStages[from] === "start") {
+    await sendMessage(from, "Сәлеметсіз бе! Бұл - Ali Doner Ақтау 🍔\nТапсырысыңызды жазыңыз:");
+    userStages[from] = "ordering";
+    userOrders[from] = [];
+    return res.sendStatus(200);
+  }
+
+  // 2️⃣ Принимаем заказы
+  if (userStages[from] === "ordering") {
+    const found = Object.keys(menu).find(item => text.toLowerCase().includes(item.toLowerCase().split(" ")[0]));
+    if (found) {
+      userOrders[from].push({ name: found, qty: 1 });
+      await sendMessage(from, `Сіз "${found}" таңдадыңыз. Қанша дана?`);
+      userStages[from] = "waiting_qty";
+      return res.sendStatus(200);
+    } else {
+      await sendMessage(from, "Менюдан таңдаңыз (мысалы: Doner Classic 30 см).");
+      return res.sendStatus(200);
+    }
+  }
+
+  // 3️⃣ Количество
+  if (userStages[from] === "waiting_qty") {
+    const qty = parseInt(text);
+    if (isNaN(qty) || qty <= 0) {
+      await sendMessage(from, "Қанша дана екенін жазыңыз (мысалы: 2)");
+      return res.sendStatus(200);
+    }
+    userOrders[from][userOrders[from].length - 1].qty = qty;
+    await sendMessage(from, "Жеткізу мекенжайын жазыңыз (мысалы: 12мкр 47үй 72пәтер)");
+    userStages[from] = "waiting_address";
+    return res.sendStatus(200);
+  }
+
+  // 4️⃣ Адрес
+  if (userStages[from] === "waiting_address") {
+    if (!/\d/.test(text)) {
+      await sendMessage(from, "Мекенжай түсініксіз. Қайта жазыңыз (мысалы: 12мкр 47үй 72пәтер)");
+      return res.sendStatus(200);
+    }
+    userAddresses[from] = text;
+    await sendMessage(from, "Телефон нөміріңізді жазыңыз (мысалы: 87771234567)");
+    userStages[from] = "waiting_phone";
+    return res.sendStatus(200);
+  }
+
+  // 5️⃣ Телефон
+  if (userStages[from] === "waiting_phone") {
+    if (!/^\d{11}$/.test(text)) {
+      await sendMessage(from, "Телефон нөмірі қате. Мысалы: 87771234567");
+      return res.sendStatus(200);
+    }
+    userPhones[from] = text;
+
+    // Формируем чек
+    const order = userOrders[from];
+    const total = order.reduce((sum, i) => sum + (menu[i.name] || 0) * i.qty, 0);
+    userTotals[from] = total;
+
+    const receipt = `
+✅ Тапсырысыңыз:
+${order.map(i => `- ${i.name} ×${i.qty} — ${(menu[i.name] || 0) * i.qty}₸`).join("\n")}
+Жалпы: ${total}₸  
+Мекенжай: ${userAddresses[from]}  
+Телефон: ${userPhones[from]}  
+Болжаған жеткізу уақыты: 35 минут  
+`;
+
+    await sendMessage(from, receipt);
+    await sendPaymentButtons(from, total);
+    userStages[from] = "waiting_payment";
+    return res.sendStatus(200);
+  }
+
+  // 6️⃣ Оплата
+  if (userStages[from] === "waiting_payment") {
+    if (/kaspi/i.test(text)) {
+      await sendMessage(from, `Kaspi арқылы төлеу үшін төмендегі сілтемені басыңыз:\n${PAYMENT_LINKS.Kaspi}`);
+      await sendMessage(from, "Тапсырысыңыз қабылданды! Рақмет ❤️");
+      await sendMessage(OPERATOR_NUMBER, `📋 Kaspi төлемі арқылы жаңа тапсырыс:\n${JSON.stringify(userOrders[from], null, 2)}\nМекенжай: ${userAddresses[from]}\nТелефон: ${userPhones[from]}\nЖалпы: ${userTotals[from]}₸`);
+      userStages[from] = "done";
+      return res.sendStatus(200);
+    }
+
+    if (/halyk/i.test(text)) {
+      await sendMessage(from, `Halyk арқылы төлеу үшін төмендегі сілтемені басыңыз:\n${PAYMENT_LINKS.Halyk}`);
+      await sendMessage(from, "Тапсырысыңыз қабылданды! Рақмет ❤️");
+      await sendMessage(OPERATOR_NUMBER, `📋 Halyk төлемі арқылы жаңа тапсырыс:\n${JSON.stringify(userOrders[from], null, 2)}\nМекенжай: ${userAddresses[from]}\nТелефон: ${userPhones[from]}\nЖалпы: ${userTotals[from]}₸`);
+      userStages[from] = "done";
+      return res.sendStatus(200);
+    }
+
+    if (/нал/i.test(text) || /қолма/i.test(text)) {
+      await sendMessage(from, "✅ Наличныемен төлем қабылданды. Тапсырысыңыз өңдеуде ❤️");
+      await sendMessage(OPERATOR_NUMBER, `📋 Новый заказ (наличные):\n${JSON.stringify(userOrders[from], null, 2)}\nМекенжай: ${userAddresses[from]}\nТелефон: ${userPhones[from]}\nЖалпы: ${userTotals[from]}₸`);
+      userStages[from] = "done";
+      return res.sendStatus(200);
+    }
+
     await sendMessage(from, "Төлем түрін таңдаңыз: Kaspi / Наличные / Halyk");
+    return res.sendStatus(200);
   }
-}
 
-
-res.sendStatus(200);
-
-  } catch (err) {
-    console.error("❌ Ошибка в обработке запроса:", err.message);
-    res.sendStatus(500);
+  // 7️⃣ Новый заказ после завершения
+  if (userStages[from] === "done") {
+    userStages[from] = "start";
+    await sendMessage(from, "Жаңа тапсырыс бере аласыз 😊");
+    return res.sendStatus(200);
   }
+
+  res.sendStatus(200);
 });
 
-// 🌐 Проверка работы
-app.get("/", (req, res) => {
-  res.send("🤖 Ali Doner бот работает и пишет в консоль!");
-});
+// 🌐 Проверка
+app.get("/", (req, res) => res.send("🤖 Ali Doner бот работает!"));
 
 app.listen(PORT, () => console.log(`✅ Сервер запущен на порту ${PORT}`));
